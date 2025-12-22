@@ -473,10 +473,31 @@ public class SabnzbdClient
             }
 
             var baseUrl = $"{protocol}://{config.Host}:{config.Port}{urlBase}/api";
-            var url = query.Contains("apikey") ? query : $"{query}&apikey={config.ApiKey}";
+
+            // Add authentication - prefer API key, fallback to username/password (matches Sonarr implementation)
+            string url;
+            if (!string.IsNullOrWhiteSpace(config.ApiKey))
+            {
+                // Use API key authentication (preferred method)
+                url = query.Contains("apikey") ? query : $"{query}&apikey={config.ApiKey}";
+            }
+            else if (!string.IsNullOrWhiteSpace(config.Username) && !string.IsNullOrWhiteSpace(config.Password))
+            {
+                // Use username/password authentication (fallback method)
+                url = $"{query}&ma_username={Uri.EscapeDataString(config.Username)}&ma_password={Uri.EscapeDataString(config.Password)}";
+            }
+            else
+            {
+                // No authentication provided - attempt anyway (SABnzbd might not require auth)
+                url = query;
+            }
+
             var fullUrl = $"{baseUrl}{url}";
 
-            _logger.LogDebug("[SABnzbd] API request: {FullUrl}", fullUrl.Replace(config.ApiKey ?? "", "***API_KEY***"));
+            _logger.LogDebug("[SABnzbd] API request: {FullUrl}",
+                fullUrl
+                    .Replace(config.ApiKey ?? "", "***API_KEY***")
+                    .Replace(config.Password ?? "", "***PASSWORD***"));
 
             // Use custom HttpClient with SSL validation disabled if option is enabled
             HttpResponseMessage response;

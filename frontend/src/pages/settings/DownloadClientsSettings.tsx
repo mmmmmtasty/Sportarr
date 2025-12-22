@@ -88,7 +88,7 @@ const downloadClientTemplates: ClientTemplate[] = [
     protocol: 'usenet',
     description: 'Open source binary newsreader',
     defaultPort: 8080,
-    fields: ['host', 'port', 'useSsl', 'urlBase', 'apiKey', 'category', 'recentPriority', 'olderPriority', 'removeCompletedDownloads', 'removeFailedDownloads']
+    fields: ['host', 'port', 'useSsl', 'urlBase', 'apiKey', 'username', 'password', 'category', 'recentPriority', 'olderPriority', 'removeCompletedDownloads', 'removeFailedDownloads']
   },
   {
     name: 'NZBGet',
