@@ -6958,8 +6958,9 @@ app.MapPost("/api/release/grab", async (
     // Usenet releases need usenet clients (SABnzbd, NZBGet, etc.)
     var torrentClients = new[] { DownloadClientType.QBittorrent, DownloadClientType.Transmission,
                                  DownloadClientType.Deluge, DownloadClientType.RTorrent,
-                                 DownloadClientType.UTorrent };
-    var usenetClients = new[] { DownloadClientType.Sabnzbd, DownloadClientType.NzbGet };
+                                 DownloadClientType.UTorrent, DownloadClientType.Decypharr };
+    var usenetClients = new[] { DownloadClientType.Sabnzbd, DownloadClientType.NzbGet,
+                                DownloadClientType.DecypharrUsenet, DownloadClientType.NZBdav };
 
     var downloadClient = await db.DownloadClients
         .Where(dc => dc.Enabled)
