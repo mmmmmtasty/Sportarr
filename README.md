@@ -24,9 +24,9 @@ services:
     image: sportarr/sportarr:latest
     container_name: sportarr
     environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=America/New_York
+      - PUID=99
+      - PGID=100
+      - UMASK=022
     volumes:
       - /path/to/sportarr/config:/config
       - /path/to/sports:/sports
@@ -35,7 +35,7 @@ services:
     restart: unless-stopped
 ```
 
-**Important:** Make sure `PUID` and `PGID` match the user that owns your media folders. You can find these by running `id` in your terminal.
+**Important:** The default `PUID=99` and `PGID=100` match Unraid's default "nobody" user. If you need different permissions, override these values to match your user (run `id` to find your UID/GID).
 
 The `/config` volume stores your database and settings. The `/sports` volume is your media library root folder.
 
@@ -48,9 +48,9 @@ After starting the container, access the web UI at `http://your-server-ip:1867`.
 ```bash
 docker run -d \
   --name=sportarr \
-  -e PUID=1000 \
-  -e PGID=1000 \
-  -e TZ=America/New_York \
+  -e PUID=99 \
+  -e PGID=100 \
+  -e UMASK=022 \
   -p 1867:1867 \
   -v /path/to/sportarr/config:/config \
   -v /path/to/sports:/sports \
@@ -185,16 +185,6 @@ See [agents/plex/README.md](agents/plex/README.md) for detailed instructions and
 4. Create a library: select **Shows**, add your sports folder, enable **Sportarr** under Metadata Downloaders
 
 See [agents/jellyfin/README.md](agents/jellyfin/README.md) for detailed instructions.
-
-## Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `Sportarr__DataPath` | Path to store config, database, and logs | `./data` |
-| `Sportarr__ApiKey` | Override the API key | Auto-generated |
-| `PUID` | User ID for file permissions (Docker only) | `1000` |
-| `PGID` | Group ID for file permissions (Docker only) | `1000` |
-| `TZ` | Timezone | `UTC` |
 
 ## Troubleshooting
 
