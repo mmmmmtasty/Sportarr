@@ -103,10 +103,11 @@ export default function IptvChannelsSettings() {
 
   const loadLeagues = async () => {
     try {
-      const { data } = await apiClient.get<League[]>('/league');
-      setLeagues(data);
+      const { data } = await apiClient.get<League[]>('/leagues');
+      setLeagues(Array.isArray(data) ? data : []);
     } catch (err: any) {
       console.error('Failed to load leagues:', err);
+      setLeagues([]);
     }
   };
 
