@@ -591,13 +591,19 @@ export default function DownloadClientsSettings({ showAdvanced = false }: Downlo
               <li className="flex items-start">
                 <span className="text-red-400 mr-2">•</span>
                 <span>
-                  <strong>Usenet Clients:</strong> SABnzbd, NZBGet for downloading from Usenet
+                  <strong>Usenet Clients:</strong> SABnzbd, NZBGet
                 </span>
               </li>
               <li className="flex items-start">
                 <span className="text-red-400 mr-2">•</span>
                 <span>
-                  <strong>Torrent Clients:</strong> qBittorrent, Transmission, Deluge for torrents
+                  <strong>Torrent Clients:</strong> qBittorrent, Transmission, Deluge, rTorrent, uTorrent
+                </span>
+              </li>
+              <li className="flex items-start">
+                <span className="text-red-400 mr-2">•</span>
+                <span>
+                  <strong>Debrid/Proxy:</strong> Decypharr (supports both torrents and usenet)
                 </span>
               </li>
               <li className="flex items-start">

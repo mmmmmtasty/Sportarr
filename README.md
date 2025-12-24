@@ -96,7 +96,7 @@ $env:Sportarr__DataPath = "C:\ProgramData\Sportarr"
 
 1. **Root Folder** - Go to Settings > Media Management and add a root folder. This is where Sportarr will store your sports library.
 
-2. **Download Client** - Settings > Download Clients. Add your download client (qBittorrent, Transmission, SABnzbd, NZBGet, etc.). If using Docker, make sure both containers can access the same download path.
+2. **Download Client** - Settings > Download Clients. Add your download client (qBittorrent, Transmission, Deluge, rTorrent, uTorrent, SABnzbd, NZBGet, or Decypharr). If using Docker, make sure both containers can access the same download path.
 
 3. **Indexers** - Settings > Indexers. Add your Usenet indexers or torrent trackers. Sportarr supports Newznab and Torznab APIs, so Prowlarr integration works out of the box.
 
@@ -142,7 +142,9 @@ You can customize the naming format in Settings > Media Management.
 
 **Usenet:** SABnzbd, NZBGet
 
-**Torrents:** qBittorrent, Transmission, Deluge, rTorrent
+**Torrents:** qBittorrent, Transmission, Deluge, rTorrent, uTorrent
+
+**Debrid/Proxy:** Decypharr (torrents and usenet)
 
 ## Media Server Agents
 

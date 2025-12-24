@@ -88,7 +88,7 @@ const settingsNavigation: SettingsNavItem[] = [
     name: 'Download Clients',
     path: '/settings/downloadclients',
     icon: ArrowDownTrayIcon,
-    description: 'Configure download clients (qBittorrent, Transmission, etc.)',
+    description: 'Configure download clients (qBittorrent, SABnzbd, Decypharr, etc.)',
   },
   {
     name: 'Connect',
