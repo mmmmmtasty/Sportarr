@@ -229,6 +229,7 @@ builder.Services.AddScoped<Sportarr.Api.Services.ImportService>(); // Handles co
 builder.Services.AddScoped<Sportarr.Api.Services.ProvideImportItemService>(); // Provides import items with path translation
 builder.Services.AddScoped<Sportarr.Api.Services.EventQueryService>(); // Universal: Sport-aware query builder for all sports
 builder.Services.AddScoped<Sportarr.Api.Services.LeagueEventSyncService>(); // Syncs events from TheSportsDB to populate leagues
+builder.Services.AddScoped<Sportarr.Api.Services.SeasonSearchService>(); // Season-level search for manual season pack discovery
 builder.Services.AddHostedService<Sportarr.Api.Services.LeagueEventAutoSyncService>(); // Background service for automatic periodic event sync
 
 // TheSportsDB client for universal sports metadata (via Sportarr-API)
@@ -7953,6 +7954,32 @@ app.MapPost("/api/leagues/{leagueId:int}/seasons/{season}/automatic-search", asy
         eventsSearched = events.Count,
         queueIds = queuedItems.Select(q => q.Id).ToList()
     });
+});
+
+// API: Manual search for a season - returns search results for user to select (like Sonarr's season search modal)
+app.MapPost("/api/leagues/{leagueId:int}/seasons/{season}/search", async (
+    int leagueId,
+    string season,
+    int? qualityProfileId,
+    Sportarr.Api.Services.SeasonSearchService seasonSearchService,
+    ILogger<Program> logger) =>
+{
+    logger.LogInformation("[SEASON SEARCH] POST /api/leagues/{LeagueId}/seasons/{Season}/search - Manual season search", leagueId, season);
+
+    try
+    {
+        var results = await seasonSearchService.SearchSeasonAsync(leagueId, season, qualityProfileId);
+        return Results.Ok(results);
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.NotFound(new { error = ex.Message });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "[SEASON SEARCH] Failed to search season {Season} for league {LeagueId}", season, leagueId);
+        return Results.Problem($"Season search failed: {ex.Message}");
+    }
 });
 
 // ========================================

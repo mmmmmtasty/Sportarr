@@ -6,6 +6,7 @@ import { useState, useEffect, useRef } from 'react';
 import apiClient from '../api/client';
 import { toast } from 'sonner';
 import ManualSearchModal from '../components/ManualSearchModal';
+import SeasonSearchModal from '../components/SeasonSearchModal';
 import AddLeagueModal from '../components/AddLeagueModal';
 import ConfirmationModal from '../components/ConfirmationModal';
 import EventFileDetailModal from '../components/EventFileDetailModal';
@@ -156,6 +157,10 @@ export default function LeagueDetailPage() {
   });
   const [leagueFilesModal, setLeagueFilesModal] = useState<{ isOpen: boolean; season?: string }>({
     isOpen: false,
+  });
+  const [seasonSearchModal, setSeasonSearchModal] = useState<{ isOpen: boolean; season: string }>({
+    isOpen: false,
+    season: '',
   });
   const [isEditTeamsModalOpen, setIsEditTeamsModalOpen] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -1055,13 +1060,9 @@ export default function LeagueDetailPage() {
 
                         {/* Season Manual Search */}
                         <button
-                          onClick={async (e) => {
+                          onClick={(e) => {
                             e.stopPropagation();
-                            toast.info('Season manual search', {
-                              description: 'This will open manual search for all monitored events in this season'
-                            });
-                            // Note: Manual search for season would require a new modal to show all events
-                            // For now, users can search individual events
+                            setSeasonSearchModal({ isOpen: true, season });
                           }}
                           className="px-2 md:px-4 py-1 md:py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs md:text-sm font-medium rounded transition-colors flex items-center gap-1 md:gap-2"
                           title="Manual Search - Browse and select releases for all events in this season"
@@ -1513,6 +1514,18 @@ export default function LeagueDetailPage() {
           leagueId={league.id}
           leagueName={league.name}
           season={leagueFilesModal.season}
+        />
+      )}
+
+      {/* Season Search Modal */}
+      {league && (
+        <SeasonSearchModal
+          isOpen={seasonSearchModal.isOpen}
+          onClose={() => setSeasonSearchModal({ isOpen: false, season: '' })}
+          leagueId={league.id}
+          leagueName={league.name}
+          season={seasonSearchModal.season}
+          qualityProfileId={league.qualityProfileId}
         />
       )}
 
