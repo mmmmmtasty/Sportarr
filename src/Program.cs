@@ -4568,9 +4568,9 @@ app.MapPost("/api/pending-imports/{id:int}/accept", async (
         };
 
         // Import the download using FileImportService
-        // Note: FilePath from download client may not be accessible yet,
-        // FileImportService will query the download client for the actual path
-        await fileImportService.ImportDownloadAsync(tempQueueItem);
+        // Pass the stored FilePath directly since we already have it from the pending import
+        // This avoids re-querying the download client which may return incomplete path info
+        await fileImportService.ImportDownloadAsync(tempQueueItem, import.FilePath);
 
         // Mark as completed
         import.Status = PendingImportStatus.Completed;

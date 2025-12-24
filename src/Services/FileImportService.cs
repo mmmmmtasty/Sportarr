@@ -42,7 +42,10 @@ public class FileImportService
     /// <summary>
     /// Import a completed download
     /// </summary>
-    public async Task<ImportHistory> ImportDownloadAsync(DownloadQueueItem download)
+    /// <param name="download">The download queue item to import</param>
+    /// <param name="overridePath">Optional: Use this path instead of querying download client.
+    /// Used for manual imports where we already know the file path.</param>
+    public async Task<ImportHistory> ImportDownloadAsync(DownloadQueueItem download, string? overridePath = null)
     {
         _logger.LogInformation("Starting import for download: {Title} (ID: {DownloadId})",
             download.Title, download.DownloadId);
@@ -66,8 +69,15 @@ public class FileImportService
             // Get media management settings
             var settings = await GetMediaManagementSettingsAsync();
 
-            // Get download path from download client
-            var downloadPath = await GetDownloadPathAsync(download);
+            // Get download path - use override if provided (manual import), otherwise query download client
+            var downloadPath = !string.IsNullOrEmpty(overridePath)
+                ? overridePath
+                : await GetDownloadPathAsync(download);
+
+            if (!string.IsNullOrEmpty(overridePath))
+            {
+                _logger.LogDebug("Using override path for manual import: {Path}", overridePath);
+            }
 
             // Debug logging for path accessibility issues
             _logger.LogDebug("Checking path accessibility: {Path}", downloadPath);
