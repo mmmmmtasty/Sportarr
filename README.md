@@ -1,6 +1,6 @@
 # <img width="24px" src="./Logo/256.png" alt="Sportarr"></img> Sportarr
 
-A PVR for sports content. If you've used Sonarr or Radarr before, you'll feel right at home.
+Sportarr - Sports PVR for usenet and torrents. Like Sonarr & Radarr but for sports events.
 
 Sportarr monitors sports leagues and events, searches your indexers for releases, and handles file renaming, organization, and integrates with media servers like Plex.
 
