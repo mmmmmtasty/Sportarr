@@ -522,7 +522,6 @@ export default function StreamPlayerModal({
               liveBufferLatencyChasing: false,     // Disable aggressive latency chasing
               liveBufferLatencyMaxLatency: 5.0,    // Allow up to 5 seconds latency
               liveBufferLatencyMinRemain: 1.0,     // Keep at least 1 second buffer
-              liveSyncDurationCount: 3,            // Sync to 3 segment durations
             });
 
             player.on(mpegts.Events.ERROR, (errorType, errorDetail, errorInfo) => {
