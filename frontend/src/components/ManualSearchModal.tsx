@@ -115,7 +115,7 @@ export default function ManualSearchModal({
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [markFailedConfirm, setMarkFailedConfirm] = useState<HistoryItem | null>(null);
 
-  // Clear search results when event changes or modal opens for a different event
+  // Clear search results and auto-start search when modal opens (Sonarr/Radarr behavior)
   useEffect(() => {
     if (isOpen) {
       setSearchResults([]);
@@ -125,8 +125,28 @@ export default function ManualSearchModal({
       setActiveTab('search');
       checkExistingFileAndQueue();
       loadHistory();
+      // Auto-start search when modal opens (like Sonarr/Radarr)
+      handleSearchOnOpen();
     }
   }, [isOpen, eventId, part]);
+
+  // Separate function for auto-search to avoid dependency issues
+  const handleSearchOnOpen = async () => {
+    setIsSearching(true);
+    setSearchError(null);
+
+    try {
+      const endpoint = `/api/event/${eventId}/search`;
+      const response = await apiPost(endpoint, { part });
+      const results = await response.json();
+      setSearchResults(results || []);
+    } catch (error) {
+      console.error('Search failed:', error);
+      setSearchError('Failed to search indexers. Please try again.');
+    } finally {
+      setIsSearching(false);
+    }
+  };
 
   // Check if there's an existing file or queue item for this event/part
   const checkExistingFileAndQueue = async () => {
