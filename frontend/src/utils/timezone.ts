@@ -1,13 +1,44 @@
 // Timezone utility for converting UTC dates to user's configured timezone
 
 /**
+ * Normalize a date string to ensure it's treated as UTC.
+ * JavaScript's Date constructor treats strings without 'Z' suffix as local time,
+ * but our backend sends UTC dates without the 'Z'. This function ensures
+ * consistent UTC parsing.
+ *
+ * @param dateString - Date string from API (may or may not have Z suffix)
+ * @returns Date object representing the UTC time
+ */
+function parseAsUtc(dateString: string): Date {
+  if (!dateString) return new Date();
+
+  // If it already has timezone info (Z or +/-offset), parse as-is
+  if (dateString.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(dateString)) {
+    return new Date(dateString);
+  }
+
+  // If it's just a date (YYYY-MM-DD), append T00:00:00Z to treat as midnight UTC
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+    return new Date(dateString + 'T00:00:00Z');
+  }
+
+  // If it has time but no timezone (YYYY-MM-DDTHH:MM:SS), append Z to treat as UTC
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(\.\d+)?$/.test(dateString)) {
+    return new Date(dateString + 'Z');
+  }
+
+  // Fallback: parse as-is (may be treated as local time by browser)
+  return new Date(dateString);
+}
+
+/**
  * Convert a UTC date string to the user's configured timezone
  * @param utcDateString - UTC date string (ISO format)
  * @param timezone - User's configured timezone ID (e.g., 'America/New_York')
  * @returns Date object adjusted to the user's timezone
  */
 export function convertToTimezone(utcDateString: string, timezone: string | null | undefined): Date {
-  const utcDate = new Date(utcDateString);
+  const utcDate = parseAsUtc(utcDateString);
 
   // If no timezone specified, return the date as-is (browser local time)
   if (!timezone) {
@@ -87,7 +118,7 @@ export function formatTimeInTimezone(
   timezone: string | null | undefined,
   options: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit' }
 ): string {
-  const utcDate = new Date(utcDateString);
+  const utcDate = parseAsUtc(utcDateString);
 
   if (!timezone) {
     return utcDate.toLocaleTimeString([], options);
@@ -112,7 +143,7 @@ export function formatDateInTimezone(
   timezone: string | null | undefined,
   options: Intl.DateTimeFormatOptions = { weekday: 'short', month: 'short', day: 'numeric' }
 ): string {
-  const utcDate = new Date(utcDateString);
+  const utcDate = parseAsUtc(utcDateString);
 
   if (!timezone) {
     return utcDate.toLocaleDateString([], options);
