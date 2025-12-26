@@ -85,6 +85,8 @@ export default function IptvChannelsSettings() {
   const [showHidden, setShowHidden] = useState(false);
   const [selectedCountries, setSelectedCountries] = useState<Set<string>>(new Set());
   const [showCountryDropdown, setShowCountryDropdown] = useState(false);
+  const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
+  const [showGroupDropdown, setShowGroupDropdown] = useState(false);
 
   // Selection state for bulk operations
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -170,6 +172,17 @@ export default function IptvChannelsSettings() {
     return Array.from(countries).sort();
   }, [channels]);
 
+  // Extract unique groups from all channels
+  const availableGroups = useMemo(() => {
+    const groups = new Set<string>();
+    channels.forEach((channel) => {
+      if (channel.group && channel.group.trim()) {
+        groups.add(channel.group.trim());
+      }
+    });
+    return Array.from(groups).sort();
+  }, [channels]);
+
   // Filter channels client-side for instant feedback
   const filteredChannels = useMemo(() => {
     return channels.filter((channel) => {
@@ -184,6 +197,11 @@ export default function IptvChannelsSettings() {
         const channelCountry = channel.country?.trim() || '';
         if (!selectedCountries.has(channelCountry)) return false;
       }
+      // Group filter - if any groups are selected, channel must match one of them
+      if (selectedGroups.size > 0) {
+        const channelGroup = channel.group?.trim() || '';
+        if (!selectedGroups.has(channelGroup)) return false;
+      }
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
         return (
@@ -193,7 +211,7 @@ export default function IptvChannelsSettings() {
       }
       return true;
     });
-  }, [channels, filterSportsOnly, filterEnabledOnly, filterFavoritesOnly, showHidden, filterStatus, searchQuery, selectedCountries]);
+  }, [channels, filterSportsOnly, filterEnabledOnly, filterFavoritesOnly, showHidden, filterStatus, searchQuery, selectedCountries, selectedGroups]);
 
   // Selection handlers
   const handleToggleSelect = (id: number) => {
@@ -750,6 +768,91 @@ export default function IptvChannelsSettings() {
                                 className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-red-600 focus:ring-red-600"
                               />
                               <span className="text-sm text-gray-300">{country}</span>
+                            </label>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Group Multi-Select Filter */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowGroupDropdown(!showGroupDropdown)}
+                  className={`px-3 py-2 bg-gray-800 border rounded-lg text-sm flex items-center space-x-2 transition-colors ${
+                    selectedGroups.size > 0
+                      ? 'border-red-600 text-white'
+                      : 'border-gray-700 text-gray-300 hover:border-gray-600'
+                  }`}
+                >
+                  <FunnelIcon className="w-4 h-4" />
+                  <span>
+                    {selectedGroups.size === 0
+                      ? 'All Groups'
+                      : `${selectedGroups.size} ${selectedGroups.size === 1 ? 'Group' : 'Groups'}`}
+                  </span>
+                  <ChevronDownIcon className={`w-4 h-4 transition-transform ${showGroupDropdown ? 'rotate-180' : ''}`} />
+                </button>
+
+                {showGroupDropdown && (
+                  <>
+                    {/* Backdrop */}
+                    <div
+                      className="fixed inset-0 z-10"
+                      onClick={() => setShowGroupDropdown(false)}
+                    />
+                    {/* Dropdown */}
+                    <div className="absolute top-full left-0 mt-1 w-64 max-h-80 overflow-y-auto bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-20">
+                      {/* Header */}
+                      <div className="sticky top-0 bg-gray-900 border-b border-gray-700 p-2 flex items-center justify-between">
+                        <span className="text-xs text-gray-400">{availableGroups.length} groups</span>
+                        <div className="flex items-center space-x-2">
+                          <button
+                            onClick={() => setSelectedGroups(new Set(availableGroups))}
+                            className="text-xs text-blue-400 hover:text-blue-300"
+                          >
+                            Select All
+                          </button>
+                          <span className="text-gray-600">|</span>
+                          <button
+                            onClick={() => setSelectedGroups(new Set())}
+                            className="text-xs text-gray-400 hover:text-gray-300"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      </div>
+                      {/* Group list */}
+                      <div className="p-1">
+                        {availableGroups.length === 0 ? (
+                          <div className="px-3 py-4 text-sm text-gray-500 text-center">
+                            No group data available
+                          </div>
+                        ) : (
+                          availableGroups.map((group) => (
+                            <label
+                              key={group}
+                              className="flex items-center space-x-2 px-3 py-1.5 hover:bg-gray-800 rounded cursor-pointer"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedGroups.has(group)}
+                                onChange={() => {
+                                  setSelectedGroups((prev) => {
+                                    const newSet = new Set(prev);
+                                    if (newSet.has(group)) {
+                                      newSet.delete(group);
+                                    } else {
+                                      newSet.add(group);
+                                    }
+                                    return newSet;
+                                  });
+                                }}
+                                className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-red-600 focus:ring-red-600"
+                              />
+                              <span className="text-sm text-gray-300">{group}</span>
                             </label>
                           ))
                         )}
