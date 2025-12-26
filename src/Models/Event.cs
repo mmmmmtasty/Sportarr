@@ -171,7 +171,12 @@ public class Event
     [JsonPropertyName("intRound")]
     public string? Round { get; set; }
 
-    [JsonPropertyName("dateEvent")]
+    /// <summary>
+    /// Event date and time in UTC. Mapped from strTimestamp (preferred, includes time)
+    /// or dateEvent (fallback, date only). strTimestamp provides accurate UTC times
+    /// for proper timezone conversion in the frontend.
+    /// </summary>
+    [JsonPropertyName("strTimestamp")]
     public DateTime EventDate { get; set; }
 
     [JsonPropertyName("strVenue")]
