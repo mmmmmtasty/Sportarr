@@ -37,11 +37,22 @@ public class FFmpegRecorderService
             _logger.LogInformation("[DVR] Starting recording {RecordingId}: {StreamUrl} -> {OutputPath}",
                 recordingId, streamUrl, outputPath);
 
+            // Validate stream URL
+            if (string.IsNullOrEmpty(streamUrl))
+            {
+                return new RecordingResult
+                {
+                    Success = false,
+                    Error = "Stream URL is empty or null"
+                };
+            }
+
             // Ensure output directory exists
             var outputDir = Path.GetDirectoryName(outputPath);
             if (!string.IsNullOrEmpty(outputDir) && !Directory.Exists(outputDir))
             {
                 Directory.CreateDirectory(outputDir);
+                _logger.LogDebug("[DVR] Created output directory: {Directory}", outputDir);
             }
 
             // Get FFmpeg path from config or use default
@@ -59,7 +70,7 @@ public class FFmpegRecorderService
             // Build FFmpeg arguments using config settings
             var arguments = await BuildFFmpegArgumentsFromConfigAsync(streamUrl, outputPath, userAgent);
 
-            _logger.LogDebug("[DVR] FFmpeg command: {FFmpegPath} {Arguments}", ffmpegPath, arguments);
+            _logger.LogInformation("[DVR] FFmpeg command: {FFmpegPath} {Arguments}", ffmpegPath, arguments);
 
             // Start FFmpeg process
             var processInfo = new ProcessStartInfo
@@ -69,11 +80,64 @@ public class FFmpegRecorderService
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                RedirectStandardInput = true,  // Allow sending 'q' for graceful stop
                 CreateNoWindow = true
             };
 
             var process = new Process { StartInfo = processInfo };
             process.Start();
+
+            // Wait briefly to check if FFmpeg fails immediately (bad stream, codec issues, etc.)
+            await Task.Delay(2000, cancellationToken);
+
+            if (process.HasExited)
+            {
+                var stderr = await process.StandardError.ReadToEndAsync();
+                _logger.LogError("[DVR] FFmpeg exited immediately with code {ExitCode}. Error: {Error}",
+                    process.ExitCode, stderr);
+
+                return new RecordingResult
+                {
+                    Success = false,
+                    Error = $"FFmpeg failed to start recording: {stderr}"
+                };
+            }
+
+            // Check if output file is being written to (should have some data after 2 seconds)
+            await Task.Delay(3000, cancellationToken);  // Wait a bit more for data
+
+            if (File.Exists(outputPath))
+            {
+                var fileInfo = new FileInfo(outputPath);
+                if (fileInfo.Length == 0)
+                {
+                    _logger.LogWarning("[DVR] Recording {RecordingId}: Output file exists but is 0 bytes after 5 seconds", recordingId);
+                    // Don't fail yet - some streams are slow to start
+                }
+                else
+                {
+                    _logger.LogInformation("[DVR] Recording {RecordingId}: Output file size after 5 seconds: {Size} bytes",
+                        recordingId, fileInfo.Length);
+                }
+            }
+            else
+            {
+                _logger.LogWarning("[DVR] Recording {RecordingId}: Output file not created after 5 seconds", recordingId);
+            }
+
+            // Check again if FFmpeg has exited during our delay
+            if (process.HasExited)
+            {
+                var stderr = await process.StandardError.ReadToEndAsync();
+                _logger.LogError("[DVR] FFmpeg exited during startup with code {ExitCode}. Error: {Error}",
+                    process.ExitCode, stderr);
+
+                return new RecordingResult
+                {
+                    Success = false,
+                    Error = $"FFmpeg stopped unexpectedly: {stderr}"
+                };
+            }
 
             // Store active recording
             var recordingProcess = new RecordingProcess
@@ -138,25 +202,34 @@ public class FFmpegRecorderService
 
             if (!process.HasExited)
             {
-                // Send 'q' to FFmpeg for graceful shutdown (properly finalizes file)
+                // Send 'q' to FFmpeg stdin for graceful shutdown (properly finalizes file)
                 try
                 {
-                    // On Windows, we can't write to stdin easily, so we'll kill gracefully
-                    // First try to close the main window
-                    process.CloseMainWindow();
+                    // Write 'q' to stdin - this is the proper way to stop FFmpeg
+                    await process.StandardInput.WriteAsync('q');
+                    await process.StandardInput.FlushAsync();
 
-                    // Wait briefly for graceful shutdown
-                    if (!process.WaitForExit(5000))
+                    _logger.LogDebug("[DVR] Sent 'q' to FFmpeg for graceful shutdown");
+
+                    // Wait for graceful shutdown
+                    var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                    try
                     {
-                        // Force kill if not responding
+                        await process.WaitForExitAsync(cts.Token);
+                        _logger.LogDebug("[DVR] FFmpeg exited gracefully with code {ExitCode}", process.ExitCode);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        _logger.LogWarning("[DVR] FFmpeg did not exit gracefully, forcing kill");
                         process.Kill();
                         await process.WaitForExitAsync();
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
+                    _logger.LogWarning(ex, "[DVR] Failed to send 'q' to FFmpeg, forcing kill");
                     // Force kill as fallback
-                    try { process.Kill(); } catch { }
+                    try { process.Kill(); await process.WaitForExitAsync(); } catch { }
                 }
             }
 
@@ -166,6 +239,16 @@ public class FFmpegRecorderService
             {
                 var fileInfo = new FileInfo(recordingProcess.OutputPath);
                 fileSize = fileInfo.Length;
+
+                if (fileSize == 0)
+                {
+                    _logger.LogWarning("[DVR] Recording {RecordingId} completed but output file is 0 bytes!", recordingId);
+                }
+            }
+            else
+            {
+                _logger.LogWarning("[DVR] Recording {RecordingId} output file not found: {Path}",
+                    recordingId, recordingProcess.OutputPath);
             }
 
             lock (_lock)
@@ -175,15 +258,16 @@ public class FFmpegRecorderService
 
             var duration = DateTime.UtcNow - recordingProcess.StartTime;
 
-            _logger.LogInformation("[DVR] Recording {RecordingId} stopped. Duration: {Duration}, Size: {Size}",
+            _logger.LogInformation("[DVR] Recording {RecordingId} stopped. Duration: {Duration}, Size: {Size} bytes",
                 recordingId, duration, fileSize?.ToString() ?? "unknown");
 
             return new RecordingResult
             {
-                Success = true,
+                Success = fileSize.HasValue && fileSize > 0,
                 OutputPath = recordingProcess.OutputPath,
                 FileSize = fileSize,
-                DurationSeconds = (int)duration.TotalSeconds
+                DurationSeconds = (int)duration.TotalSeconds,
+                Error = fileSize == 0 ? "Recording completed but output file is empty" : null
             };
         }
         catch (Exception ex)
@@ -986,6 +1070,9 @@ public class FFmpegRecorderService
 
     private async Task MonitorRecordingAsync(RecordingProcess recording, CancellationToken cancellationToken)
     {
+        var hasReceivedData = false;
+        var errorMessages = new List<string>();
+
         try
         {
             var process = recording.Process;
@@ -996,9 +1083,37 @@ public class FFmpegRecorderService
                 var line = await process.StandardError.ReadLineAsync();
                 if (line != null)
                 {
-                    // Log significant messages
-                    if (line.Contains("error", StringComparison.OrdinalIgnoreCase) ||
-                        line.Contains("warning", StringComparison.OrdinalIgnoreCase))
+                    // Check for successful stream connection
+                    if (line.Contains("Opening", StringComparison.OrdinalIgnoreCase) ||
+                        line.Contains("Stream mapping", StringComparison.OrdinalIgnoreCase) ||
+                        line.Contains("Output #0", StringComparison.OrdinalIgnoreCase))
+                    {
+                        hasReceivedData = true;
+                        _logger.LogDebug("[DVR] Recording {RecordingId}: {Message}",
+                            recording.RecordingId, line);
+                    }
+                    // Log progress lines (time=, size=, bitrate=)
+                    else if (line.Contains("time=", StringComparison.OrdinalIgnoreCase) ||
+                             line.Contains("size=", StringComparison.OrdinalIgnoreCase))
+                    {
+                        hasReceivedData = true;
+                        // Only log occasionally to avoid spam
+                        _logger.LogDebug("[DVR] Recording {RecordingId} progress: {Message}",
+                            recording.RecordingId, line.Trim());
+                    }
+                    // Log significant error messages
+                    else if (line.Contains("error", StringComparison.OrdinalIgnoreCase) ||
+                             line.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
+                             line.Contains("Invalid", StringComparison.OrdinalIgnoreCase) ||
+                             line.Contains("Connection refused", StringComparison.OrdinalIgnoreCase) ||
+                             line.Contains("Connection timed out", StringComparison.OrdinalIgnoreCase) ||
+                             line.Contains("Server returned", StringComparison.OrdinalIgnoreCase))
+                    {
+                        errorMessages.Add(line);
+                        _logger.LogError("[DVR] Recording {RecordingId} ERROR: {Message}",
+                            recording.RecordingId, line);
+                    }
+                    else if (line.Contains("warning", StringComparison.OrdinalIgnoreCase))
                     {
                         _logger.LogWarning("[DVR] Recording {RecordingId}: {Message}",
                             recording.RecordingId, line);
@@ -1012,6 +1127,19 @@ public class FFmpegRecorderService
             {
                 _logger.LogWarning("[DVR] Recording {RecordingId} exited with code {ExitCode}",
                     recording.RecordingId, process.ExitCode);
+
+                if (errorMessages.Any())
+                {
+                    _logger.LogError("[DVR] Recording {RecordingId} errors: {Errors}",
+                        recording.RecordingId, string.Join("; ", errorMessages));
+                }
+            }
+
+            // Check if we never received any data
+            if (!hasReceivedData)
+            {
+                _logger.LogWarning("[DVR] Recording {RecordingId}: No stream data was received. The stream URL may be invalid or inaccessible.",
+                    recording.RecordingId);
             }
         }
         catch (OperationCanceledException)
