@@ -490,18 +490,16 @@ public class FFmpegRecorderService
         var videoCodec = config.DvrVideoCodec?.ToLower() ?? "copy";
         var isTranscoding = videoCodec != "copy";
 
-        // Hardware acceleration input (for decoding) - ONLY when transcoding
-        // When using -c:v copy, we don't need hardware decoding and it can cause failures
-        // if the hardware isn't properly configured in Docker
+        // Hardware acceleration approach (like Tdarr):
+        // - DON'T use -hwaccel qsv for input decoding (causes MFX session init failures in Docker)
+        // - Just use software decoding + hardware encoding (e.g., -c:v hevc_qsv for output only)
+        // - This is more reliable and still provides significant speed improvement
         var hwAccel = forceNoHwAccel ? HardwareAcceleration.None : (HardwareAcceleration)config.DvrHardwareAcceleration;
-        if (isTranscoding && hwAccel != HardwareAcceleration.None && hwAccel != HardwareAcceleration.Auto)
-        {
-            var hwAccelInput = GetHardwareAccelerationInputArgs(hwAccel);
-            if (!string.IsNullOrEmpty(hwAccelInput))
-            {
-                args.Add(hwAccelInput);
-            }
-        }
+
+        // NOTE: We intentionally do NOT add hardware decoding args here
+        // Hardware decoding (-hwaccel qsv) requires proper MFX session initialization
+        // which often fails in Docker. Instead, we only use hardware ENCODING
+        // (software decode -> hardware encode) which is more reliable and still fast.
 
         // User agent if provided
         if (!string.IsNullOrEmpty(userAgent))
@@ -519,6 +517,27 @@ public class FFmpegRecorderService
         args.Add("-reconnect_streamed 1");
         args.Add("-reconnect_delay_max 5");
 
+        // For QSV/VAAPI encoding, we need to initialize hardware device BEFORE the input
+        // This is the Tdarr approach: software decode -> hwupload -> hardware encode
+        var encoder = isTranscoding ? GetVideoEncoderFromCodecString(videoCodec, hwAccel) : "copy";
+        var isHardwareEncoder = encoder.Contains("_qsv") || encoder.Contains("_vaapi");
+
+        if (isHardwareEncoder && hwAccel != HardwareAcceleration.None)
+        {
+            // Initialize hardware device for encoding (not decoding)
+            // This is required for QSV/VAAPI encoders when input is software decoded
+            if (hwAccel == HardwareAcceleration.QuickSync)
+            {
+                args.Add("-init_hw_device qsv=hw");
+                args.Add("-filter_hw_device hw");
+            }
+            else if (hwAccel == HardwareAcceleration.Vaapi)
+            {
+                args.Add("-init_hw_device vaapi=hw:/dev/dri/renderD128");
+                args.Add("-filter_hw_device hw");
+            }
+        }
+
         // Input
         args.Add($"-i \"{streamUrl}\"");
 
@@ -529,9 +548,32 @@ public class FFmpegRecorderService
         }
         else
         {
-            // Use the video codec specified in config (supports hardware encoders like h264_nvenc, hevc_nvenc, etc.)
-            var encoder = GetVideoEncoderFromCodecString(videoCodec, hwAccel);
+            // For QSV/VAAPI, we need to upload frames to GPU memory before encoding
+            // since we're using software decoding
+            if (isHardwareEncoder && hwAccel != HardwareAcceleration.None)
+            {
+                if (hwAccel == HardwareAcceleration.QuickSync)
+                {
+                    // QSV: Upload decoded frames to GPU, convert to QSV format
+                    args.Add("-vf hwupload=extra_hw_frames=64,format=qsv");
+                }
+                else if (hwAccel == HardwareAcceleration.Vaapi)
+                {
+                    // VAAPI: Upload and convert to NV12 format
+                    args.Add("-vf format=nv12,hwupload");
+                }
+            }
+
             args.Add($"-c:v {encoder}");
+
+            // Add quality settings for hardware encoders
+            if (isHardwareEncoder)
+            {
+                // Use global_quality for QSV (like CRF, 1-51, lower is better)
+                // Default to 23 which is similar to x264/x265 CRF 23
+                args.Add("-global_quality 23");
+                args.Add("-look_ahead 1");
+            }
 
             // Video bitrate if specified
             if (config.DvrVideoBitrate > 0)
