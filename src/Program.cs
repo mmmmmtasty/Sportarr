@@ -7465,10 +7465,12 @@ app.MapPut("/api/dvr/recordings/{id:int}", async (int id, ScheduleDvrRecordingRe
     }
 });
 
-// Delete a recording
+// Delete a recording (defaults to deleting the file on disk too)
 app.MapDelete("/api/dvr/recordings/{id:int}", async (int id, Sportarr.Api.Services.DvrRecordingService dvrService, bool? deleteFile) =>
 {
-    var deleted = await dvrService.DeleteRecordingAsync(id, deleteFile ?? false);
+    // Default to true - when user deletes a recording, they typically want the file gone too
+    // Pass deleteFile=false explicitly to only remove from database (keep file)
+    var deleted = await dvrService.DeleteRecordingAsync(id, deleteFile ?? true);
     if (!deleted)
         return Results.NotFound();
     return Results.NoContent();
