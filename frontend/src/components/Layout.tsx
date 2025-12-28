@@ -11,9 +11,11 @@ import {
   Bars3Icon,
   XMarkIcon,
   SignalIcon,
+  ArrowRightOnRectangleIcon,
 } from '@heroicons/react/24/outline';
 import { useState, useEffect } from 'react';
 import FooterStatusBar from './FooterStatusBar';
+import { useAuth } from '../contexts/AuthContext';
 
 interface MenuItem {
   label: string;
@@ -26,6 +28,7 @@ export default function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
   const { data: systemStatus } = useSystemStatus();
+  const { isAuthDisabled, logout } = useAuth();
   const [expandedMenus, setExpandedMenus] = useState<string[]>(['Leagues']);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -305,6 +308,19 @@ export default function Layout() {
 
         {/* Sonarr-style status bar (inside sidebar) */}
         <FooterStatusBar />
+
+        {/* Logout button - only show when auth is enabled */}
+        {!isAuthDisabled && (
+          <div className="px-4 py-2 border-t border-red-900/30">
+            <button
+              onClick={logout}
+              className="w-full flex items-center space-x-2 px-3 py-2 text-sm text-gray-400 hover:text-white hover:bg-red-900/20 rounded-lg transition-colors"
+            >
+              <ArrowRightOnRectangleIcon className="w-5 h-5" />
+              <span>Sign Out</span>
+            </button>
+          </div>
+        )}
 
         {/* Footer */}
         <div className="p-4 border-t border-red-900/30">

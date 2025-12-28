@@ -622,6 +622,26 @@ export default function GeneralSettings({ showAdvanced = false }: GeneralSetting
             </p>
           </div>
 
+          {/* Authentication Required - only show when auth method is forms or basic */}
+          {(securitySettings.authenticationMethod === 'forms' || securitySettings.authenticationMethod === 'basic') && (
+            <div>
+              <label className="block text-white font-medium mb-2">Authentication Required</label>
+              <select
+                value={securitySettings.authenticationRequired}
+                onChange={(e) => setSecuritySettings(prev => ({ ...prev, authenticationRequired: e.target.value }))}
+                className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-red-600"
+              >
+                <option value="enabled">Enabled (Always Required)</option>
+                <option value="disabledForLocalAddresses">Disabled for Local Addresses</option>
+              </select>
+              <p className="text-xs text-gray-500 mt-1">
+                {securitySettings.authenticationRequired === 'enabled'
+                  ? 'Authentication is required for all connections, including local network.'
+                  : 'Authentication is only required for external connections. Local network (192.168.x.x, 10.x.x.x, localhost) can access without login.'}
+              </p>
+            </div>
+          )}
+
           {showAdvanced && (
             <div>
               <label className="block text-white font-medium mb-2">Certificate Validation</label>

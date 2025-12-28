@@ -8237,13 +8237,17 @@ app.MapGet("/api/leagues/{id:int}", async (int id, SportarrDbContext db) =>
     });
 });
 
-// API: Get all events for a specific league
+// API: Get all events for a specific league (filtered by monitoring settings)
 app.MapGet("/api/leagues/{id:int}/events", async (int id, SportarrDbContext db, ILogger<Program> logger) =>
 {
     logger.LogInformation("[LEAGUES] Getting events for league ID: {LeagueId}", id);
 
-    // Verify league exists
-    var league = await db.Leagues.FindAsync(id);
+    // Get league with monitored teams for filtering
+    var league = await db.Leagues
+        .Include(l => l.MonitoredTeams)
+        .ThenInclude(lt => lt.Team)
+        .FirstOrDefaultAsync(l => l.Id == id);
+
     if (league == null)
     {
         logger.LogWarning("[LEAGUES] League not found: {LeagueId}", id);
@@ -8259,10 +8263,76 @@ app.MapGet("/api/leagues/{id:int}/events", async (int id, SportarrDbContext db, 
         .OrderByDescending(e => e.EventDate)
         .ToListAsync();
 
-    // Convert to DTOs
-    var response = events.Select(EventResponse.FromEvent).ToList();
+    // Filter events based on monitoring settings
+    List<Event> filteredEvents;
 
-    logger.LogInformation("[LEAGUES] Found {Count} events for league: {LeagueName}", response.Count, league.Name);
+    if (EventPartDetector.IsMotorsport(league.Sport))
+    {
+        // Motorsports: filter by monitored session types
+        if (league.MonitoredSessionTypes == null)
+        {
+            // null = no filter, show all events
+            filteredEvents = events;
+            logger.LogDebug("[LEAGUES] Motorsport league with no session filter - showing all {Count} events", events.Count);
+        }
+        else if (league.MonitoredSessionTypes == "")
+        {
+            // Empty string = user explicitly selected no sessions, show nothing
+            filteredEvents = new List<Event>();
+            logger.LogDebug("[LEAGUES] Motorsport league with empty session filter - showing no events");
+        }
+        else
+        {
+            // Filter by monitored session types
+            filteredEvents = events
+                .Where(e => EventPartDetector.IsMotorsportSessionMonitored(e.Title, league.Name, league.MonitoredSessionTypes))
+                .ToList();
+            logger.LogDebug("[LEAGUES] Motorsport league filtered by sessions ({Sessions}) - {Filtered}/{Total} events",
+                league.MonitoredSessionTypes, filteredEvents.Count, events.Count);
+        }
+    }
+    else
+    {
+        // Regular sports: filter by monitored teams
+        // Note: Disable team-based filtering for Fighting sports (same as sync service)
+        // because "teams" in these sports are weight classes, not the actual participants
+        var monitoredTeamIds = new HashSet<string>();
+
+        if (league.Sport != "Fighting")
+        {
+            monitoredTeamIds = league.MonitoredTeams
+                .Where(lt => lt.Monitored && lt.Team != null)
+                .Select(lt => lt.Team!.ExternalId)
+                .Where(id => !string.IsNullOrEmpty(id))
+                .Select(id => id!)
+                .ToHashSet();
+        }
+
+        if (monitoredTeamIds.Count == 0)
+        {
+            // No monitored teams = show all events (or league doesn't use team filtering)
+            filteredEvents = events;
+            logger.LogDebug("[LEAGUES] No monitored teams - showing all {Count} events", events.Count);
+        }
+        else
+        {
+            // Filter to events involving at least one monitored team
+            // Use the external ID properties stored on the event
+            filteredEvents = events
+                .Where(e =>
+                    (!string.IsNullOrEmpty(e.HomeTeamExternalId) && monitoredTeamIds.Contains(e.HomeTeamExternalId)) ||
+                    (!string.IsNullOrEmpty(e.AwayTeamExternalId) && monitoredTeamIds.Contains(e.AwayTeamExternalId)))
+                .ToList();
+            logger.LogDebug("[LEAGUES] Filtered by {TeamCount} monitored teams - {Filtered}/{Total} events",
+                monitoredTeamIds.Count, filteredEvents.Count, events.Count);
+        }
+    }
+
+    // Convert to DTOs
+    var response = filteredEvents.Select(EventResponse.FromEvent).ToList();
+
+    logger.LogInformation("[LEAGUES] Found {Count} events for league: {LeagueName} (filtered from {Total})",
+        response.Count, league.Name, events.Count);
     return Results.Ok(response);
 });
 
