@@ -783,6 +783,20 @@ export default function LeagueDetailPage() {
         toast.success('Events refreshed successfully', {
           description: `${response.data.newEvents} new events added, ${response.data.updatedEvents} updated, ${response.data.skippedEvents} skipped`,
         });
+
+        // Also recalculate episode numbers to fix any ordering issues
+        try {
+          const recalcResponse = await apiClient.post(`/leagues/${id}/recalculate-episodes`);
+          if (recalcResponse.data.success && recalcResponse.data.renumberedCount > 0) {
+            toast.info('Episode numbers fixed', {
+              description: `${recalcResponse.data.renumberedCount} events renumbered`,
+            });
+          }
+        } catch (recalcError) {
+          console.error('Recalculate episodes error:', recalcError);
+          // Don't show error toast - episode recalculation is a secondary operation
+        }
+
         // Refresh league data to show new events
         queryClient.invalidateQueries({ queryKey: ['league', id] });
         queryClient.invalidateQueries({ queryKey: ['league', id, 'events'] });

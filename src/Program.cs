@@ -9301,6 +9301,86 @@ app.MapPost("/api/leagues/{id:int}/refresh-events", async (
     }
 });
 
+// API: Manually recalculate episode numbers for a league (useful for fixing incorrect numbering)
+app.MapPost("/api/leagues/{id:int}/recalculate-episodes", async (
+    int id,
+    SportarrDbContext db,
+    Sportarr.Api.Services.FileRenameService fileRenameService,
+    ILogger<Program> logger) =>
+{
+    logger.LogInformation("[LEAGUES] POST /api/leagues/{Id}/recalculate-episodes - Recalculating episode numbers", id);
+
+    try
+    {
+        var league = await db.Leagues.FindAsync(id);
+        if (league == null)
+        {
+            return Results.NotFound(new { error = "League not found" });
+        }
+
+        // Get all unique seasons for this league
+        var seasons = await db.Events
+            .Where(e => e.LeagueId == id && !string.IsNullOrEmpty(e.Season))
+            .Select(e => e.Season)
+            .Distinct()
+            .ToListAsync();
+
+        if (!seasons.Any())
+        {
+            return Results.Ok(new { success = true, message = "No seasons found to recalculate", renumberedCount = 0, renamedCount = 0 });
+        }
+
+        int totalRenumbered = 0;
+        int totalFilesRenamed = 0;
+
+        foreach (var season in seasons)
+        {
+            if (!string.IsNullOrEmpty(season))
+            {
+                logger.LogInformation("[LEAGUES] Recalculating episode numbers for season {Season}", season);
+
+                var renumbered = await fileRenameService.RecalculateEpisodeNumbersAsync(id, season);
+                totalRenumbered += renumbered;
+
+                if (renumbered > 0)
+                {
+                    logger.LogInformation("[LEAGUES] Renumbered {Count} events in season {Season}", renumbered, season);
+
+                    // Also rename files to reflect new episode numbers
+                    var renamed = await fileRenameService.RenameAllFilesInSeasonAsync(id, season);
+                    totalFilesRenamed += renamed;
+
+                    if (renamed > 0)
+                    {
+                        logger.LogInformation("[LEAGUES] Renamed {Count} files in season {Season}", renamed, season);
+                    }
+                }
+            }
+        }
+
+        logger.LogInformation("[LEAGUES] Recalculation complete: {Renumbered} events renumbered, {Renamed} files renamed across {SeasonCount} seasons",
+            totalRenumbered, totalFilesRenamed, seasons.Count);
+
+        return Results.Ok(new
+        {
+            success = true,
+            message = $"Recalculated episode numbers for {seasons.Count} seasons",
+            seasonsProcessed = seasons.Count,
+            renumberedCount = totalRenumbered,
+            renamedCount = totalFilesRenamed
+        });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "[LEAGUES] Error recalculating episode numbers for league {Id}: {Message}", id, ex.Message);
+        return Results.Problem(
+            detail: ex.Message,
+            statusCode: 500,
+            title: "Error recalculating episode numbers"
+        );
+    }
+});
+
 // ====================================================================================
 // TEAMS API - Universal Sports Support
 // ====================================================================================
