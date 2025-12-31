@@ -103,13 +103,28 @@ public class EventQueryService
         var homeTeam = NormalizeTeamName(homeTeamName);
         var awayTeam = NormalizeTeamName(awayTeamName);
         var leaguePrefix = GetTeamSportLeaguePrefix(leagueName);
-        var dateStr = evt.EventDate.ToString("yyyy MM dd");
+
+        // Use period-separated format to match scene release naming conventions
+        // e.g., "NFL.2025.12.07.Los.Angeles.Rams.Vs.Arizona.Cardinals"
+        var dateStr = evt.EventDate.ToString("yyyy.MM.dd");
+        var formattedHomeTeam = FormatTeamNameForScene(homeTeam);
+        var formattedAwayTeam = FormatTeamNameForScene(awayTeam);
 
         if (!string.IsNullOrEmpty(leaguePrefix))
         {
-            return $"{leaguePrefix} {dateStr} {homeTeam} {awayTeam}";
+            return $"{leaguePrefix}.{dateStr}.{formattedHomeTeam}.Vs.{formattedAwayTeam}";
         }
-        return $"{homeTeam} {awayTeam}";
+        return $"{formattedHomeTeam}.Vs.{formattedAwayTeam}";
+    }
+
+    /// <summary>
+    /// Format team name for scene release conventions.
+    /// Replaces spaces with periods to match scene naming.
+    /// e.g., "Los Angeles Rams" -> "Los.Angeles.Rams"
+    /// </summary>
+    private string FormatTeamNameForScene(string teamName)
+    {
+        return teamName.Replace(" ", ".");
     }
 
     private string GetTeamSportLeaguePrefix(string? leagueName)
@@ -143,12 +158,15 @@ public class EventQueryService
         // Determine series prefix
         var seriesPrefix = GetMotorsportSeriesPrefix(leagueName);
 
-        // Build query like "Formula1 2025 Round24 Abu Dhabi" or "Formula1 2025 Abu Dhabi"
+        // Format location with periods to match scene release conventions
+        var formattedLocation = location.Replace(" ", ".");
+
+        // Build query like "Formula1.2025.Round24.Abu.Dhabi" or "Formula1.2025.Abu.Dhabi"
         if (round.HasValue)
         {
-            return $"{seriesPrefix} {year} Round{round:D2} {location}".Trim();
+            return $"{seriesPrefix}.{year}.Round{round:D2}.{formattedLocation}".Trim('.');
         }
-        return $"{seriesPrefix} {year} {location}".Trim();
+        return $"{seriesPrefix}.{year}.{formattedLocation}".Trim('.');
     }
 
     private int? ExtractRoundNumber(string? round)
