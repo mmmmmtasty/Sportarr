@@ -222,39 +222,51 @@ public class LeagueEventSyncService
         league.LastUpdate = DateTime.UtcNow;
         await _db.SaveChangesAsync();
 
-        // Process any seasons that need episode renumbering due to date changes
+        // Process all synced seasons - recalculate episode numbers and rename files to match current naming format
+        // This ensures all files have correct episode numbers and follow the standard event format
         if (_seasonsNeedingRenumber.Any())
         {
-            _logger.LogInformation("[League Event Sync] Processing {Count} seasons that need episode renumbering",
+            _logger.LogInformation("[League Event Sync] Processing {Count} seasons for episode number sync and file renaming",
                 _seasonsNeedingRenumber.Count);
+
+            int totalRenumbered = 0;
+            int totalRenamed = 0;
 
             foreach (var (seasonLeagueId, seasonStr) in _seasonsNeedingRenumber)
             {
                 try
                 {
-                    // Recalculate episode numbers based on chronological order
+                    // Recalculate episode numbers from API (ensures DB matches Plex metadata)
                     var renumberedCount = await _fileRenameService.RecalculateEpisodeNumbersAsync(seasonLeagueId, seasonStr);
+                    totalRenumbered += renumberedCount;
 
                     if (renumberedCount > 0)
                     {
                         _logger.LogInformation("[League Event Sync] Renumbered {Count} episodes in season {Season}",
                             renumberedCount, seasonStr);
+                    }
 
-                        // Rename all files in this season to reflect new episode numbers
-                        var renamedCount = await _fileRenameService.RenameAllFilesInSeasonAsync(
-                            seasonLeagueId, seasonStr);
+                    // ALWAYS scan and rename files to ensure they match current naming format
+                    // This catches files that were imported with wrong episode numbers or old naming format
+                    var renamedCount = await _fileRenameService.RenameAllFilesInSeasonAsync(seasonLeagueId, seasonStr);
+                    totalRenamed += renamedCount;
 
-                        if (renamedCount > 0)
-                        {
-                            _logger.LogInformation("[League Event Sync] Renamed {Count} files in season {Season} to match new episode numbers",
-                                renamedCount, seasonStr);
-                        }
+                    if (renamedCount > 0)
+                    {
+                        _logger.LogInformation("[League Event Sync] Renamed {Count} files in season {Season} to match naming format",
+                            renamedCount, seasonStr);
                     }
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "[League Event Sync] Failed to renumber/rename season {Season}", seasonStr);
                 }
+            }
+
+            if (totalRenumbered > 0 || totalRenamed > 0)
+            {
+                _logger.LogInformation("[League Event Sync] File sync complete: {Renumbered} episodes renumbered, {Renamed} files renamed",
+                    totalRenumbered, totalRenamed);
             }
 
             // Clear the set for next sync
@@ -432,29 +444,12 @@ public class LeagueEventSyncService
                 result.UpdatedCount++;
                 _logger.LogInformation("[League Event Sync] Updated event: {EventTitle}{DateNote}{TitleNote}{EpisodeNote}",
                     apiEvent.Title,
-                    dateChanged ? " (date changed - will renumber episodes)" : "",
-                    titleChanged ? " (title changed - will rename files)" : "",
-                    episodeNumberChanged ? " (episode number corrected - will rename files)" : "");
+                    dateChanged ? " (date changed)" : "",
+                    titleChanged ? " (title changed)" : "",
+                    episodeNumberChanged ? " (episode corrected)" : "");
 
-                // If title or episode number changed, trigger immediate file rename for this event
-                // (Skip if date changed, as we'll rename after renumbering the entire season)
-                if ((titleChanged || episodeNumberChanged) && !dateChanged)
-                {
-                    try
-                    {
-                        var renamedFiles = await _fileRenameService.RenameEventFilesAsync(existingEvent.Id);
-                        if (renamedFiles > 0)
-                        {
-                            _logger.LogInformation("[League Event Sync] Renamed {Count} files for event '{Title}'",
-                                renamedFiles, apiEvent.Title);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "[League Event Sync] Failed to rename files for event '{Title}'",
-                            apiEvent.Title);
-                    }
-                }
+                // Note: File renaming is handled at the end of sync via RenameAllFilesInSeasonAsync
+                // which scans all files and renames any that don't match the expected naming format
             }
             else
             {
