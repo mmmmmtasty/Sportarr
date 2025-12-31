@@ -46,20 +46,28 @@ public class EventQueryService
         // Build ONE primary query based on event type
         string primaryQuery;
 
-        if (evt.HomeTeam != null && evt.AwayTeam != null)
+        // Check for team names - first from navigation properties, then from direct string properties
+        var homeTeamName = evt.HomeTeam?.Name ?? evt.HomeTeamName;
+        var awayTeamName = evt.AwayTeam?.Name ?? evt.AwayTeamName;
+
+        if (!string.IsNullOrEmpty(homeTeamName) && !string.IsNullOrEmpty(awayTeamName))
         {
             // Team sport (NBA, NFL, Premier League, etc.)
             // Just team names - indexer returns all separator formats (vs, @, v)
             // Our ReleaseMatchingService handles parsing any separator
-            var homeTeam = NormalizeTeamName(evt.HomeTeam.Name);
-            var awayTeam = NormalizeTeamName(evt.AwayTeam.Name);
+            var homeTeam = NormalizeTeamName(homeTeamName);
+            var awayTeam = NormalizeTeamName(awayTeamName);
             primaryQuery = $"{homeTeam} {awayTeam}";
+            _logger.LogDebug("[EventQuery] Using team names: '{Home}' vs '{Away}' -> query: '{Query}'",
+                homeTeamName, awayTeamName, primaryQuery);
         }
         else
         {
             // Non-team sport or individual event (UFC, Formula 1, etc.)
             // Normalized title gets all parts (Main Card, Prelims, Early Prelims)
             primaryQuery = NormalizeEventTitle(evt.Title);
+            _logger.LogDebug("[EventQuery] Using normalized title: '{Title}' -> query: '{Query}'",
+                evt.Title, primaryQuery);
         }
 
         queries.Add(primaryQuery);

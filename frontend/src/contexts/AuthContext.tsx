@@ -37,7 +37,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       clearTimeout(timeoutId);
 
-      const currentPath = location.pathname;
+      // Use window.location.pathname to get the actual browser URL
+      // (location from useLocation might not be accurate on initial load)
+      const currentPath = window.location.pathname;
+      console.log('[AUTH] Current path:', currentPath);
 
       if (response.ok) {
         const data = await response.json();
@@ -87,7 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, [navigate, location.pathname]);
+  }, [navigate]);
 
   // Initial auth check on mount only
   useEffect(() => {
