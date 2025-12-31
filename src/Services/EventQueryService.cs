@@ -151,13 +151,8 @@ public class EventQueryService
         return cleanedName;
     }
 
-    /// <summary>
-    /// Normalize event title for search queries.
-    /// Handles TV-style shows (Dana White's Contender Series Season 9 Week 10 -> DWCS S09E10)
-    /// </summary>
     private string NormalizeEventTitle(string title)
     {
-        // Handle TV-style sports shows first (Season X Week/Episode Y format)
         var seasonEpisodeMatch = Regex.Match(title,
             @"(.+?)\s+[Ss]eason\s+(\d+)\s+(?:Week|Episode|Ep\.?)\s*(\d+)",
             RegexOptions.IgnoreCase);
@@ -167,18 +162,13 @@ public class EventQueryService
             var showName = seasonEpisodeMatch.Groups[1].Value.Trim();
             var season = int.Parse(seasonEpisodeMatch.Groups[2].Value);
             var episode = int.Parse(seasonEpisodeMatch.Groups[3].Value);
-
-            // Get short name if available
             var shortName = GetShowShortName(showName);
-
-            // Return in SxxExx format - much better for indexer searches
-            // e.g., "DWCS S09E10" instead of "Dana Whites Contender Series season 9 Week 10"
+            var normalizedQuery = $"{shortName} S{season:D2}E{episode:D2}";
             _logger.LogDebug("[EventQuery] Converted TV-style title '{Original}' to '{Normalized}'",
-                title, $"{shortName} S{season:D2}E{episode:D2}");
-            return $"{shortName} S{season:D2}E{episode:D2}";
+                title, normalizedQuery);
+            return normalizedQuery;
         }
 
-        // Handle "Week X" format without explicit season (assume current or season 1)
         var weekOnlyMatch = Regex.Match(title,
             @"(.+?)\s+Week\s*(\d+)$",
             RegexOptions.IgnoreCase);
@@ -187,53 +177,42 @@ public class EventQueryService
         {
             var showName = weekOnlyMatch.Groups[1].Value.Trim();
             var week = int.Parse(weekOnlyMatch.Groups[2].Value);
-
             var shortName = GetShowShortName(showName);
-
-            // Use Week number directly if no season
             return $"{shortName} Week {week}";
         }
 
-        // Remove common prefixes that are redundant
         var prefixes = new[] { "UFC ", "Bellator ", "PFL ", "ONE ", "WWE ", "AEW " };
-
-        // Keep the prefix but ensure proper format
         foreach (var prefix in prefixes)
         {
             if (title.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
             {
-                return title; // Already has proper prefix
+                return title;
             }
         }
 
         return title.Trim();
     }
 
-    /// <summary>
-    /// Get short name for common sports shows
-    /// </summary>
     private string GetShowShortName(string showName)
     {
-        // Common abbreviations for sports shows
-        var abbreviations = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        var sceneNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            { "Dana Whites Contender Series", "DWCS" },
-            { "Dana White's Contender Series", "DWCS" },
-            { "The Ultimate Fighter", "TUF" },
+            { "Dana White's Contender Series", "Dana Whites Contender Series" },
+            { "Dana Whites Contender Series", "Dana Whites Contender Series" },
+            { "The Ultimate Fighter", "The Ultimate Fighter" },
             { "Road to UFC", "Road to UFC" },
             { "UFC Ultimate Insider", "UFC Ultimate Insider" },
         };
 
-        foreach (var (full, abbrev) in abbreviations)
+        foreach (var (full, sceneName) in sceneNames)
         {
             if (showName.Contains(full, StringComparison.OrdinalIgnoreCase))
             {
-                return abbrev;
+                return sceneName;
             }
         }
 
-        // Return original if no abbreviation found
-        return showName;
+        return showName.Replace("'", "");
     }
 
     /// <summary>
