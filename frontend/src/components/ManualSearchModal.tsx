@@ -15,6 +15,7 @@ import {
   InformationCircleIcon,
   CloudArrowDownIcon,
   CheckCircleIcon,
+  ArchiveBoxIcon,
 } from '@heroicons/react/24/outline';
 import { apiPost, apiGet, apiDelete } from '../utils/api';
 
@@ -62,6 +63,7 @@ interface ReleaseSearchResult {
   isBlocklisted?: boolean;
   blocklistReason?: string;
   protocol?: 'torrent' | 'usenet';
+  isPack?: boolean;
 }
 
 interface QueueItem {
@@ -100,6 +102,7 @@ export default function ManualSearchModal({
 }: ManualSearchModalProps) {
   const [activeTab, setActiveTab] = useState<TabType>('search');
   const [isSearching, setIsSearching] = useState(false);
+  const [isSearchingPack, setIsSearchingPack] = useState(false);
   const [searchResults, setSearchResults] = useState<ReleaseSearchResult[]>([]);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [downloadingIndex, setDownloadingIndex] = useState<number | null>(null);
@@ -234,6 +237,36 @@ export default function ManualSearchModal({
       setSearchError('Failed to search indexers. Please try again.');
     } finally {
       setIsSearching(false);
+    }
+  };
+
+  // Search for week packs (e.g., NFL-2025-Week15) that contain this event
+  const handleSearchPack = async () => {
+    setIsSearchingPack(true);
+    setSearchError(null);
+    setSearchResults([]);
+
+    try {
+      const endpoint = `/api/event/${eventId}/search-pack`;
+      const response = await apiPost(endpoint, {});
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Pack search failed');
+      }
+
+      const results = await response.json();
+      setSearchResults(results || []);
+
+      if (results.length === 0) {
+        setSearchError('No week packs found. This event may not be part of a weekly schedule (e.g., NFL/NBA/NHL week).');
+      }
+    } catch (error) {
+      console.error('Pack search failed:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to search for week packs. Please try again.';
+      setSearchError(errorMessage);
+    } finally {
+      setIsSearchingPack(false);
     }
   };
 
@@ -681,8 +714,27 @@ export default function ManualSearchModal({
                           Filter
                         </button>
                         <button
+                          onClick={handleSearchPack}
+                          disabled={isSearching || isSearchingPack}
+                          className="px-3 md:px-4 py-1 md:py-1.5 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 text-white rounded transition-colors flex items-center gap-1.5 md:gap-2 text-xs md:text-sm"
+                          title="Search for week packs (e.g., NFL-2025-Week15) containing this event"
+                        >
+                          {isSearchingPack ? (
+                            <>
+                              <div className="animate-spin rounded-full h-3.5 w-3.5 md:h-4 md:w-4 border-b-2 border-white"></div>
+                              <span className="hidden sm:inline">Searching...</span>
+                            </>
+                          ) : (
+                            <>
+                              <ArchiveBoxIcon className="w-3.5 h-3.5 md:w-4 md:h-4" />
+                              <span className="hidden sm:inline">Search Weekly Pack</span>
+                              <span className="sm:hidden">Pack</span>
+                            </>
+                          )}
+                        </button>
+                        <button
                           onClick={handleSearch}
-                          disabled={isSearching}
+                          disabled={isSearching || isSearchingPack}
                           className="px-3 md:px-4 py-1 md:py-1.5 bg-red-600 hover:bg-red-700 disabled:bg-gray-600 text-white rounded transition-colors flex items-center gap-1.5 md:gap-2 text-xs md:text-sm"
                         >
                           {isSearching ? (
@@ -855,6 +907,11 @@ export default function ManualSearchModal({
                                   </td>
                                   <td className="py-1 px-2" style={{ maxWidth: '300px' }}>
                                     <div className="flex items-start gap-1">
+                                      {result.isPack && (
+                                        <span className="px-1 py-0.5 bg-purple-600 text-white text-[9px] font-bold rounded flex-shrink-0">
+                                          PACK
+                                        </span>
+                                      )}
                                       {result.isBlocklisted && (
                                         <NoSymbolIcon className="w-3 h-3 text-orange-400 flex-shrink-0 mt-0.5" />
                                       )}

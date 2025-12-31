@@ -308,6 +308,12 @@ public class ReleaseSearchResult
     /// Null if search was for the whole event
     /// </summary>
     public string? Part { get; set; }
+
+    /// <summary>
+    /// Whether this is a pack release (e.g., NFL-2025-Week15 containing multiple games)
+    /// Pack releases require special handling - they contain files for multiple events
+    /// </summary>
+    public bool IsPack { get; set; } = false;
 }
 
 /// <summary>
@@ -455,6 +461,22 @@ public class PendingImport
     /// Torrent info hash for tracking
     /// </summary>
     public string? TorrentInfoHash { get; set; }
+
+    /// <summary>
+    /// True if this is a multi-file pack (e.g., NFL-2025-Week15)
+    /// Packs require special handling to import multiple events from one download
+    /// </summary>
+    public bool IsPack { get; set; }
+
+    /// <summary>
+    /// Number of video files in this download (for packs)
+    /// </summary>
+    public int FileCount { get; set; }
+
+    /// <summary>
+    /// Number of events this pack matches (populated after pack scan)
+    /// </summary>
+    public int MatchedEventsCount { get; set; }
 }
 
 /// <summary>

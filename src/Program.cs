@@ -301,6 +301,7 @@ builder.Services.AddScoped<Sportarr.Api.Services.EventQueryService>(); // Univer
 builder.Services.AddScoped<Sportarr.Api.Services.LeagueEventSyncService>(); // Syncs events from TheSportsDB to populate leagues
 builder.Services.AddScoped<Sportarr.Api.Services.SeasonSearchService>(); // Season-level search for manual season pack discovery
 builder.Services.AddScoped<Sportarr.Api.Services.EventMappingService>(); // Event mapping sync and lookup for release name matching
+builder.Services.AddScoped<Sportarr.Api.Services.PackImportService>(); // Multi-file pack import (e.g., NFL-2025-Week15 containing all games)
 builder.Services.AddHostedService<Sportarr.Api.Services.EventMappingSyncBackgroundService>(); // Automatic event mapping sync every 12 hours (like Sonarr XEM)
 builder.Services.AddHostedService<Sportarr.Api.Services.LeagueEventAutoSyncService>(); // Background service for automatic periodic event sync
 
@@ -5109,6 +5110,147 @@ app.MapPost("/api/pending-imports/scan", async (Sportarr.Api.Services.ExternalDo
     return Results.Ok(new { message = "Scan completed" });
 });
 
+// API: Pack Import (Multi-file pack downloads like NFL-2025-Week15)
+app.MapPost("/api/pack-import/scan", async (
+    PackImportScanRequest request,
+    Sportarr.Api.Services.PackImportService packImportService) =>
+{
+    // Scan a pack download directory for files matching monitored events
+    if (string.IsNullOrEmpty(request.Path))
+        return Results.BadRequest(new { error = "Path is required" });
+
+    var matches = await packImportService.ScanPackForMatchesAsync(request.Path, request.LeagueId);
+    return Results.Ok(new {
+        path = request.Path,
+        filesFound = matches.Count,
+        matches = matches.Select(m => new {
+            m.FileName,
+            m.EventId,
+            m.EventTitle,
+            m.MatchConfidence
+        })
+    });
+});
+
+app.MapPost("/api/pack-import/import", async (
+    PackImportRequest request,
+    Sportarr.Api.Services.PackImportService packImportService) =>
+{
+    // Import all matching files from a pack download
+    if (string.IsNullOrEmpty(request.Path))
+        return Results.BadRequest(new { error = "Path is required" });
+
+    var result = await packImportService.ImportPackAsync(
+        request.Path,
+        request.LeagueId,
+        request.DeleteUnmatched ?? true,
+        request.DryRun ?? false);
+
+    return Results.Ok(new {
+        filesScanned = result.FilesScanned,
+        filesImported = result.FilesImported,
+        filesSkipped = result.FilesSkipped,
+        filesDeleted = result.FilesDeleted,
+        matches = result.Matches.Select(m => new {
+            m.FileName,
+            m.EventId,
+            m.EventTitle,
+            m.MatchConfidence,
+            m.WasImported,
+            m.Error
+        }),
+        errors = result.Errors
+    });
+});
+
+// Pack import from pending imports
+app.MapPost("/api/pending-imports/{id:int}/import-pack", async (
+    int id,
+    SportarrDbContext db,
+    Sportarr.Api.Services.PackImportService packImportService,
+    ILogger<Program> logger) =>
+{
+    // Import all matching files from a pack-type pending import
+    var import = await db.PendingImports
+        .Include(pi => pi.DownloadClient)
+        .FirstOrDefaultAsync(pi => pi.Id == id);
+
+    if (import is null) return Results.NotFound();
+    if (!import.IsPack)
+        return Results.BadRequest(new { error = "This is not a pack download. Use the regular accept endpoint." });
+
+    try
+    {
+        import.Status = PendingImportStatus.Importing;
+        await db.SaveChangesAsync();
+
+        // Import all matching files from the pack
+        var result = await packImportService.ImportPackAsync(
+            import.FilePath,
+            leagueId: null,
+            deleteUnmatched: true,
+            dryRun: false);
+
+        // Mark as completed
+        import.Status = PendingImportStatus.Completed;
+        import.ResolvedAt = DateTime.UtcNow;
+        import.MatchedEventsCount = result.FilesImported;
+        await db.SaveChangesAsync();
+
+        logger.LogInformation("[Pack Import] Successfully imported {Count} files from pack: {Title}",
+            result.FilesImported, import.Title);
+
+        return Results.Ok(new {
+            filesScanned = result.FilesScanned,
+            filesImported = result.FilesImported,
+            filesSkipped = result.FilesSkipped,
+            filesDeleted = result.FilesDeleted,
+            matches = result.Matches.Select(m => new {
+                m.FileName,
+                m.EventId,
+                m.EventTitle,
+                m.MatchConfidence,
+                m.WasImported,
+                m.Error
+            }),
+            errors = result.Errors
+        });
+    }
+    catch (Exception ex)
+    {
+        import.Status = PendingImportStatus.Pending;
+        import.ErrorMessage = ex.Message;
+        await db.SaveChangesAsync();
+        logger.LogError(ex, "[Pack Import] Failed to import pack: {Title}", import.Title);
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+// Get pack scan preview from pending import
+app.MapGet("/api/pending-imports/{id:int}/pack-matches", async (
+    int id,
+    SportarrDbContext db,
+    Sportarr.Api.Services.PackImportService packImportService) =>
+{
+    var import = await db.PendingImports.FindAsync(id);
+    if (import is null) return Results.NotFound();
+    if (!import.IsPack)
+        return Results.BadRequest(new { error = "This is not a pack download" });
+
+    var matches = await packImportService.ScanPackForMatchesAsync(import.FilePath);
+    return Results.Ok(new {
+        path = import.FilePath,
+        title = import.Title,
+        filesFound = matches.Count,
+        matches = matches.Select(m => new {
+            m.FileName,
+            m.EventId,
+            m.EventTitle,
+            m.MatchConfidence
+        })
+    });
+});
+
 // API: Import History Management
 app.MapGet("/api/history", async (SportarrDbContext db, int page = 1, int pageSize = 50) =>
 {
@@ -8463,6 +8605,87 @@ app.MapPost("/api/event/{eventId:int}/search", async (
 
     logger.LogInformation("[SEARCH] Search completed. Returning {Count} unique results ({DateRejected} date-rejected, {Blocked} blocklisted)",
         sortedResults.Count, dateRejectionCount, sortedResults.Count(r => r.IsBlocklisted));
+    return Results.Ok(sortedResults);
+});
+
+// API: Pack search for event - searches for week/round pack releases (e.g., NFL-2025-Week15)
+// Use when individual event releases aren't available
+app.MapPost("/api/event/{eventId:int}/search-pack", async (
+    int eventId,
+    SportarrDbContext db,
+    Sportarr.Api.Services.IndexerSearchService indexerSearchService,
+    Sportarr.Api.Services.EventQueryService eventQueryService,
+    Sportarr.Api.Services.ConfigService configService,
+    ILogger<Program> logger) =>
+{
+    logger.LogInformation("[PACK SEARCH] POST /api/event/{EventId}/search-pack - Pack search initiated", eventId);
+
+    var evt = await db.Events
+        .Include(e => e.HomeTeam)
+        .Include(e => e.AwayTeam)
+        .Include(e => e.League)
+        .FirstOrDefaultAsync(e => e.Id == eventId);
+
+    if (evt == null)
+    {
+        logger.LogWarning("[PACK SEARCH] Event {EventId} not found", eventId);
+        return Results.NotFound();
+    }
+
+    // Get quality profile for evaluation
+    QualityProfile? qualityProfile = null;
+    if (evt.QualityProfileId.HasValue)
+    {
+        qualityProfile = await db.QualityProfiles
+            .FirstOrDefaultAsync(p => p.Id == evt.QualityProfileId.Value);
+    }
+    if (qualityProfile == null && evt.League?.QualityProfileId != null)
+    {
+        qualityProfile = await db.QualityProfiles
+            .FirstOrDefaultAsync(p => p.Id == evt.League.QualityProfileId.Value);
+    }
+    if (qualityProfile == null)
+    {
+        qualityProfile = await db.QualityProfiles.OrderBy(q => q.Id).FirstOrDefaultAsync();
+    }
+
+    // Build pack queries (e.g., "NFL-2025-Week15")
+    var queries = eventQueryService.BuildPackQueries(evt);
+
+    if (queries.Count == 0)
+    {
+        return Results.BadRequest(new { error = "Cannot build pack query for this event - may not be a team sport or week number cannot be determined" });
+    }
+
+    var allResults = new List<ReleaseSearchResult>();
+    var seenGuids = new HashSet<string>();
+
+    foreach (var query in queries)
+    {
+        logger.LogInformation("[PACK SEARCH] Searching: '{Query}'", query);
+        var results = await indexerSearchService.SearchAllIndexersAsync(query, 50, qualityProfile?.Id, null, evt.Sport, true, null);
+
+        foreach (var result in results)
+        {
+            if (!string.IsNullOrEmpty(result.Guid) && !seenGuids.Contains(result.Guid))
+            {
+                seenGuids.Add(result.Guid);
+                // Mark as pack result
+                result.IsPack = true;
+                allResults.Add(result);
+            }
+        }
+
+        // Stop if we have enough results
+        if (allResults.Count >= 10) break;
+    }
+
+    // Sort by score/quality
+    var sortedResults = allResults
+        .OrderByDescending(r => r.Score)
+        .ToList();
+
+    logger.LogInformation("[PACK SEARCH] Pack search completed. Returning {Count} results", sortedResults.Count);
     return Results.Ok(sortedResults);
 });
 
@@ -12666,6 +12889,8 @@ finally
 public record UpdateSuggestionRequest(int? EventId, string? Part);
 public record SetPreferredChannelRequest(int? ChannelId);
 public record BulkRenameRequest(List<int> LeagueIds);
+public record PackImportScanRequest(string Path, int? LeagueId);
+public record PackImportRequest(string Path, int? LeagueId, bool? DeleteUnmatched, bool? DryRun);
 
 // Make Program class accessible to integration tests
 public partial class Program { }

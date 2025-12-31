@@ -144,6 +144,16 @@ interface PendingImport {
   suggestionConfidence: number;
   detected: string;
   protocol?: string;
+  isPack?: boolean;
+  fileCount?: number;
+  matchedEventsCount?: number;
+}
+
+interface PackMatchPreview {
+  fileName: string;
+  eventId: number;
+  eventTitle: string;
+  matchConfidence: number;
 }
 
 type RemovalMethod = 'removeFromClient' | 'changeCategory' | 'ignoreDownload';
@@ -204,6 +214,10 @@ export default function ActivityPage() {
   const [regrabbing, setRegrabbing] = useState<number | null>(null);
   const [bulkRegrabbing, setBulkRegrabbing] = useState(false);
   const [selectedPendingImport, setSelectedPendingImport] = useState<PendingImport | null>(null);
+  const [packPreviewImport, setPackPreviewImport] = useState<PendingImport | null>(null);
+  const [packMatches, setPackMatches] = useState<PackMatchPreview[]>([]);
+  const [loadingPackPreview, setLoadingPackPreview] = useState(false);
+  const [importingPack, setImportingPack] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true); // Only true for initial load
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [removeQueueDialog, setRemoveQueueDialog] = useState<RemoveQueueDialog | null>(null);
@@ -436,6 +450,38 @@ export default function ActivityPage() {
 
   const handleRefresh = () => {
     loadData();
+  };
+
+  // Pack import handlers
+  const handleShowPackPreview = async (pendingImport: PendingImport) => {
+    try {
+      setPackPreviewImport(pendingImport);
+      setLoadingPackPreview(true);
+      const response = await apiClient.get(`/pending-imports/${pendingImport.id}/pack-matches`);
+      setPackMatches(response.data.matches || []);
+    } catch (error: any) {
+      console.error('Failed to load pack matches:', error);
+      alert(error.response?.data?.error || 'Failed to load pack preview');
+      setPackPreviewImport(null);
+    } finally {
+      setLoadingPackPreview(false);
+    }
+  };
+
+  const handleImportPack = async (pendingImport: PendingImport) => {
+    try {
+      setImportingPack(pendingImport.id);
+      const response = await apiClient.post(`/pending-imports/${pendingImport.id}/import-pack`);
+      const data = response.data;
+      alert(`Pack imported: ${data.filesImported} files imported, ${data.filesSkipped} skipped, ${data.filesDeleted} deleted`);
+      setPackPreviewImport(null);
+      loadQueue();
+    } catch (error: any) {
+      console.error('Failed to import pack:', error);
+      alert(error.response?.data?.error || 'Failed to import pack');
+    } finally {
+      setImportingPack(null);
+    }
   };
 
   const handleOpenRemoveQueueDialog = (item: QueueItem) => {
@@ -1043,15 +1089,27 @@ export default function ActivityPage() {
                   <tbody className="divide-y divide-gray-700">
                     {/* Pending Imports - External downloads needing manual mapping */}
                     {pendingImports.map((pendingImport) => (
-                      <tr key={`pending-${pendingImport.id}`} className="bg-yellow-900/10 hover:bg-yellow-900/20 transition-colors border-l-4 border-yellow-500">
+                      <tr
+                        key={`pending-${pendingImport.id}`}
+                        className={`${pendingImport.isPack ? 'bg-purple-900/10 hover:bg-purple-900/20 border-l-4 border-purple-500' : 'bg-yellow-900/10 hover:bg-yellow-900/20 border-l-4 border-yellow-500'} transition-colors`}
+                      >
                         <td colSpan={columnOrder.filter(col => columnVisibility[col]).length + 1} className="px-6 py-4">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-4">
-                              <ExclamationCircleIcon className="w-6 h-6 text-yellow-400 flex-shrink-0" />
+                              <ExclamationCircleIcon className={`w-6 h-6 ${pendingImport.isPack ? 'text-purple-400' : 'text-yellow-400'} flex-shrink-0`} />
                               <div>
-                                <div className="text-white font-medium">External Download - Manual Import Needed</div>
+                                <div className="text-white font-medium flex items-center gap-2">
+                                  {pendingImport.isPack ? (
+                                    <>
+                                      <span className="px-2 py-0.5 bg-purple-600 text-white text-xs rounded-full">PACK</span>
+                                      Multi-File Pack - {pendingImport.fileCount} files, {pendingImport.matchedEventsCount} matching events
+                                    </>
+                                  ) : (
+                                    'External Download - Manual Import Needed'
+                                  )}
+                                </div>
                                 <div className="text-sm text-gray-300 mt-1">{pendingImport.title}</div>
-                                {pendingImport.suggestedEvent && (
+                                {!pendingImport.isPack && pendingImport.suggestedEvent && (
                                   <div className="text-sm text-gray-400 mt-1">
                                     Suggested: {pendingImport.suggestedEvent.title} ({pendingImport.suggestionConfidence}% confidence)
                                   </div>
@@ -1076,13 +1134,38 @@ export default function ActivityPage() {
                                 <TrashIcon className="w-5 h-5" />
                                 Remove
                               </button>
-                              <button
-                                onClick={() => setSelectedPendingImport(pendingImport)}
-                                className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg transition-colors flex items-center gap-2"
-                              >
-                                <DocumentCheckIcon className="w-5 h-5" />
-                                Manual Import
-                              </button>
+                              {pendingImport.isPack ? (
+                                <>
+                                  <button
+                                    onClick={() => handleShowPackPreview(pendingImport)}
+                                    className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors flex items-center gap-2"
+                                    title="Preview which files will be imported"
+                                  >
+                                    Preview
+                                  </button>
+                                  <button
+                                    onClick={() => handleImportPack(pendingImport)}
+                                    disabled={importingPack === pendingImport.id}
+                                    className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white rounded-lg transition-colors flex items-center gap-2"
+                                    title="Import all matching files from this pack"
+                                  >
+                                    {importingPack === pendingImport.id ? (
+                                      <ArrowPathIcon className="w-5 h-5 animate-spin" />
+                                    ) : (
+                                      <DocumentCheckIcon className="w-5 h-5" />
+                                    )}
+                                    Import Pack
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  onClick={() => setSelectedPendingImport(pendingImport)}
+                                  className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg transition-colors flex items-center gap-2"
+                                >
+                                  <DocumentCheckIcon className="w-5 h-5" />
+                                  Manual Import
+                                </button>
+                              )}
                             </div>
                           </div>
                         </td>
@@ -1793,6 +1876,107 @@ export default function ActivityPage() {
               loadQueue(); // Refresh queue to remove imported item
             }}
           />
+        )}
+
+        {/* Pack Preview Modal */}
+        {packPreviewImport && (
+          <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+            <div className="bg-gradient-to-br from-gray-900 to-black border border-purple-700 rounded-lg max-w-3xl w-full max-h-[80vh] overflow-hidden flex flex-col">
+              <div className="px-6 py-4 border-b border-gray-700 flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                    <span className="px-2 py-0.5 bg-purple-600 text-white text-xs rounded-full">PACK</span>
+                    Pack Preview
+                  </h3>
+                  <p className="text-sm text-gray-400 mt-1">{packPreviewImport.title}</p>
+                </div>
+                <button
+                  onClick={() => setPackPreviewImport(null)}
+                  className="text-gray-400 hover:text-white transition-colors"
+                >
+                  <XMarkIcon className="w-6 h-6" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-6">
+                {loadingPackPreview ? (
+                  <div className="text-center py-12">
+                    <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-purple-600 border-t-transparent"></div>
+                    <p className="mt-4 text-gray-400">Scanning pack for matching events...</p>
+                  </div>
+                ) : packMatches.length === 0 ? (
+                  <div className="text-center py-12 text-gray-400">
+                    <ExclamationTriangleIcon className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                    <p>No matching monitored events found in this pack</p>
+                    <p className="text-sm mt-2">Make sure you have events monitored that match the files in this pack</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-gray-300 mb-4">
+                      Found <span className="text-purple-400 font-bold">{packMatches.length}</span> files matching monitored events:
+                    </p>
+                    <table className="w-full">
+                      <thead>
+                        <tr className="text-gray-400 text-xs border-b border-gray-700">
+                          <th className="text-left py-2 px-2">File</th>
+                          <th className="text-left py-2 px-2">Matched Event</th>
+                          <th className="text-center py-2 px-2">Confidence</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-800">
+                        {packMatches.map((match, idx) => (
+                          <tr key={idx} className="hover:bg-gray-800/50">
+                            <td className="py-2 px-2 text-sm text-gray-300 break-all">{match.fileName}</td>
+                            <td className="py-2 px-2 text-sm text-white">{match.eventTitle}</td>
+                            <td className="py-2 px-2 text-center">
+                              <span className={`px-2 py-0.5 rounded text-xs ${
+                                match.matchConfidence >= 80 ? 'bg-green-900/50 text-green-400' :
+                                match.matchConfidence >= 50 ? 'bg-yellow-900/50 text-yellow-400' :
+                                'bg-red-900/50 text-red-400'
+                              }`}>
+                                {match.matchConfidence}%
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              <div className="px-6 py-4 border-t border-gray-700 flex justify-between items-center">
+                <p className="text-sm text-gray-400">
+                  Unmatched files will be deleted after import
+                </p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setPackPreviewImport(null)}
+                    className="px-6 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors"
+                  >
+                    Close
+                  </button>
+                  <button
+                    onClick={() => handleImportPack(packPreviewImport)}
+                    disabled={importingPack === packPreviewImport.id || packMatches.length === 0}
+                    className="px-6 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white rounded-lg transition-colors flex items-center gap-2"
+                  >
+                    {importingPack === packPreviewImport.id ? (
+                      <>
+                        <ArrowPathIcon className="w-5 h-5 animate-spin" />
+                        Importing...
+                      </>
+                    ) : (
+                      <>
+                        <DocumentCheckIcon className="w-5 h-5" />
+                        Import {packMatches.length} Files
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </div>

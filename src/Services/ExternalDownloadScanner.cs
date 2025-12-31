@@ -14,17 +14,23 @@ public class ExternalDownloadScanner
     private readonly SportarrDbContext _db;
     private readonly DownloadClientService _downloadClientService;
     private readonly ImportMatchingService _matchingService;
+    private readonly PackImportService _packImportService;
     private readonly ILogger<ExternalDownloadScanner> _logger;
+
+    // Supported video file extensions for pack detection
+    private static readonly string[] VideoExtensions = { ".mkv", ".mp4", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".ts" };
 
     public ExternalDownloadScanner(
         SportarrDbContext db,
         DownloadClientService downloadClientService,
         ImportMatchingService matchingService,
+        PackImportService packImportService,
         ILogger<ExternalDownloadScanner> logger)
     {
         _db = db;
         _downloadClientService = downloadClientService;
         _matchingService = matchingService;
+        _packImportService = packImportService;
         _logger = logger;
     }
 
@@ -224,6 +230,9 @@ public class ExternalDownloadScanner
 
         _logger.LogInformation("[External Download Scanner] New external download detected: {Title}", download.Title);
 
+        // Check if this is a multi-file pack (e.g., NFL-2025-Week15)
+        var packInfo = DetectPack(download.FilePath, download.Title);
+
         // Try to automatically match to an event
         var suggestion = await _matchingService.FindBestMatchAsync(download.Title, download.FilePath);
 
@@ -238,18 +247,26 @@ public class ExternalDownloadScanner
             Quality = suggestion?.Quality,
             QualityScore = suggestion?.QualityScore ?? 0,
             Status = PendingImportStatus.Pending,
-            SuggestedEventId = suggestion?.EventId,
-            SuggestedPart = suggestion?.Part,
-            SuggestionConfidence = suggestion?.Confidence ?? 0,
+            SuggestedEventId = packInfo.IsPack ? null : suggestion?.EventId, // Don't suggest single event for packs
+            SuggestedPart = packInfo.IsPack ? null : suggestion?.Part,
+            SuggestionConfidence = packInfo.IsPack ? 0 : suggestion?.Confidence ?? 0,
             Protocol = download.Protocol,
             TorrentInfoHash = download.TorrentInfoHash,
+            IsPack = packInfo.IsPack,
+            FileCount = packInfo.FileCount,
+            MatchedEventsCount = packInfo.MatchedEventsCount,
             Detected = DateTime.UtcNow
         };
 
         _db.PendingImports.Add(pendingImport);
         await _db.SaveChangesAsync();
 
-        if (suggestion != null && suggestion.Confidence >= 80)
+        if (packInfo.IsPack)
+        {
+            _logger.LogInformation("[External Download Scanner] 📦 Pack detected: {Title} ({FileCount} files, {MatchCount} matching events)",
+                download.Title, packInfo.FileCount, packInfo.MatchedEventsCount);
+        }
+        else if (suggestion != null && suggestion.Confidence >= 80)
         {
             _logger.LogInformation("[External Download Scanner] High-confidence match ({Confidence}%) for {Title} → {Event}",
                 suggestion.Confidence, download.Title, suggestion.EventTitle);
@@ -259,5 +276,58 @@ public class ExternalDownloadScanner
             _logger.LogWarning("[External Download Scanner] ⚠ Manual intervention required for: {Title} (confidence: {Confidence}%)",
                 download.Title, suggestion?.Confidence ?? 0);
         }
+    }
+
+    /// <summary>
+    /// Detect if a download is a multi-file pack (e.g., NFL week pack)
+    /// </summary>
+    private (bool IsPack, int FileCount, int MatchedEventsCount) DetectPack(string filePath, string title)
+    {
+        try
+        {
+            // Check if it's a directory with multiple video files
+            if (Directory.Exists(filePath))
+            {
+                var videoFiles = Directory.GetFiles(filePath, "*.*", SearchOption.AllDirectories)
+                    .Where(f => VideoExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
+                    .ToList();
+
+                // Consider it a pack if:
+                // 1. Has 3+ video files, OR
+                // 2. Has 2+ video files AND title contains week/pack keywords
+                var isPack = videoFiles.Count >= 3 ||
+                            (videoFiles.Count >= 2 && IsPackTitle(title));
+
+                if (isPack)
+                {
+                    // Scan pack for event matches
+                    var matches = _packImportService.ScanPackForMatchesAsync(filePath).GetAwaiter().GetResult();
+                    return (true, videoFiles.Count, matches.Count);
+                }
+
+                return (false, videoFiles.Count, 0);
+            }
+
+            // Single file is never a pack
+            return (false, 1, 0);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[External Download Scanner] Error detecting pack for {Path}", filePath);
+            return (false, 1, 0);
+        }
+    }
+
+    /// <summary>
+    /// Check if title suggests this is a week/season pack
+    /// </summary>
+    private bool IsPackTitle(string title)
+    {
+        var lower = title.ToLowerInvariant();
+        return lower.Contains("week") ||
+               lower.Contains("pack") ||
+               lower.Contains("collection") ||
+               System.Text.RegularExpressions.Regex.IsMatch(lower, @"w\d{1,2}") || // W15, W01, etc.
+               System.Text.RegularExpressions.Regex.IsMatch(lower, @"round\s*\d+");
     }
 }

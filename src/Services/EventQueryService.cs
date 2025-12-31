@@ -86,6 +86,120 @@ public class EventQueryService
     }
 
     /// <summary>
+    /// Build search queries for a week/round pack release.
+    /// Used when individual event releases aren't available.
+    /// Example: "NFL-2025-Week15" or "NBA.2025.Week.10"
+    /// </summary>
+    public List<string> BuildPackQueries(Event evt)
+    {
+        var queries = new List<string>();
+        var leagueName = evt.League?.Name;
+        var leaguePrefix = GetTeamSportLeaguePrefix(leagueName);
+
+        if (string.IsNullOrEmpty(leaguePrefix))
+        {
+            _logger.LogDebug("[EventQuery] Cannot build pack query - no league prefix for {League}", leagueName);
+            return queries;
+        }
+
+        // Calculate week number from event date
+        var weekNumber = GetWeekNumber(evt);
+        var year = evt.EventDate.Year;
+
+        if (weekNumber.HasValue)
+        {
+            // Primary format: NFL-2025-Week15 or NFL.2025.Week.15
+            queries.Add($"{leaguePrefix}-{year}-Week{weekNumber}");
+            queries.Add($"{leaguePrefix}.{year}.Week.{weekNumber}");
+            queries.Add($"{leaguePrefix}.{year}.W{weekNumber:D2}");
+
+            _logger.LogInformation("[EventQuery] Built pack queries for {League} Week {Week}: {Queries}",
+                leaguePrefix, weekNumber, string.Join(" | ", queries));
+        }
+        else
+        {
+            _logger.LogDebug("[EventQuery] Cannot determine week number for {Title}", evt.Title);
+        }
+
+        return queries;
+    }
+
+    /// <summary>
+    /// Get the week number for an event based on its date and league season.
+    /// For NFL: Week 1 starts first Thursday after Labor Day
+    /// For NBA/NHL/MLB: Based on season start date
+    /// </summary>
+    private int? GetWeekNumber(Event evt)
+    {
+        var leagueName = evt.League?.Name?.ToLowerInvariant() ?? "";
+        var eventDate = evt.EventDate;
+
+        // Try to extract week from event title first (e.g., "Week 15" in title)
+        var weekMatch = System.Text.RegularExpressions.Regex.Match(
+            evt.Title, @"Week\s*(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (weekMatch.Success && int.TryParse(weekMatch.Groups[1].Value, out var titleWeek))
+        {
+            return titleWeek;
+        }
+
+        // Try to extract from Round field
+        if (!string.IsNullOrEmpty(evt.Round))
+        {
+            var roundMatch = System.Text.RegularExpressions.Regex.Match(evt.Round, @"(\d+)");
+            if (roundMatch.Success && int.TryParse(roundMatch.Groups[1].Value, out var roundNum))
+            {
+                return roundNum;
+            }
+        }
+
+        // Calculate based on league season start dates
+        DateTime seasonStart;
+
+        if (leagueName.Contains("nfl") || leagueName.Contains("national football league"))
+        {
+            // NFL: Season starts first Thursday after Labor Day (first Monday of September)
+            seasonStart = GetNflSeasonStart(eventDate.Year);
+        }
+        else if (leagueName.Contains("nba") || leagueName.Contains("national basketball association"))
+        {
+            // NBA: Season typically starts mid-October
+            seasonStart = new DateTime(eventDate.Year, 10, 15);
+            if (eventDate < seasonStart) seasonStart = new DateTime(eventDate.Year - 1, 10, 15);
+        }
+        else if (leagueName.Contains("nhl") || leagueName.Contains("national hockey league"))
+        {
+            // NHL: Season typically starts early October
+            seasonStart = new DateTime(eventDate.Year, 10, 1);
+            if (eventDate < seasonStart) seasonStart = new DateTime(eventDate.Year - 1, 10, 1);
+        }
+        else
+        {
+            // Default: assume calendar year weeks
+            return (int)Math.Ceiling((eventDate.DayOfYear) / 7.0);
+        }
+
+        var daysSinceStart = (eventDate - seasonStart).Days;
+        if (daysSinceStart < 0) return null;
+
+        return (daysSinceStart / 7) + 1;
+    }
+
+    /// <summary>
+    /// Get NFL season start date (first Thursday after Labor Day)
+    /// </summary>
+    private DateTime GetNflSeasonStart(int year)
+    {
+        // Labor Day is first Monday of September
+        var laborDay = new DateTime(year, 9, 1);
+        while (laborDay.DayOfWeek != DayOfWeek.Monday)
+            laborDay = laborDay.AddDays(1);
+
+        // First Thursday after Labor Day
+        var firstThursday = laborDay.AddDays(3);
+        return firstThursday;
+    }
+
+    /// <summary>
     /// Normalize team name for search queries.
     /// Removes common suffixes and standardizes format.
     /// </summary>
@@ -107,14 +221,20 @@ public class EventQueryService
         // Use period-separated format to match scene release naming conventions
         // e.g., "NFL.2025.12.07.Los.Angeles.Rams.Vs.Arizona.Cardinals"
         var dateStr = evt.EventDate.ToString("yyyy.MM.dd");
-        var formattedHomeTeam = FormatTeamNameForScene(homeTeam);
-        var formattedAwayTeam = FormatTeamNameForScene(awayTeam);
+
+        // IMPORTANT: Don't include both teams with "Vs" in between - indexers list teams in either order!
+        // Instead, search by league + date + one team name (the shorter one for broader matching)
+        // This finds releases regardless of whether they're "Team A Vs Team B" or "Team B Vs Team A"
+        // Our ReleaseMatchingService will validate both teams are present in results
+        var shorterTeam = homeTeam.Length <= awayTeam.Length ? homeTeam : awayTeam;
+        var formattedTeam = FormatTeamNameForScene(shorterTeam);
 
         if (!string.IsNullOrEmpty(leaguePrefix))
         {
-            return $"{leaguePrefix}.{dateStr}.{formattedHomeTeam}.Vs.{formattedAwayTeam}";
+            // Search: NFL.2025.11.30.Dolphins (will find both team orderings)
+            return $"{leaguePrefix}.{dateStr}.{formattedTeam}";
         }
-        return $"{formattedHomeTeam}.Vs.{formattedAwayTeam}";
+        return $"{dateStr}.{formattedTeam}";
     }
 
     /// <summary>
