@@ -132,25 +132,28 @@ public class ReleaseCacheService
         // Build search terms from event
         var eventSearchTerms = BuildEventSearchTerms(evt);
 
-        _logger.LogDebug("[ReleaseCache] Searching for event '{Event}' with terms: {Terms}",
-            evt.Title, string.Join(", ", eventSearchTerms.Take(5)));
+        var sportPrefix = GetSportPrefix(evt.League?.Name, evt.Sport);
+        _logger.LogInformation("[ReleaseCache] Searching for event '{Event}' (Sport: {Sport}, Prefix: {Prefix}, Year: {Year})",
+            evt.Title, evt.Sport, sportPrefix ?? "none", evt.EventDate.Year);
 
         // Query cache using the search terms
         // We use a combination of indexed lookups and LIKE queries
         var query = _db.ReleaseCache
             .Where(r => r.ExpiresAt > DateTime.UtcNow); // Only non-expired entries
 
-        // If we have year/round info, use indexed lookup first (fast)
+        // STRICT: Year must match (don't allow null years through for known sports)
         if (evt.EventDate.Year > 0)
         {
-            query = query.Where(r => r.Year == null || r.Year == evt.EventDate.Year);
+            query = query.Where(r => r.Year == evt.EventDate.Year);
         }
 
-        // Get potential matches based on sport prefix
-        var sportPrefix = GetSportPrefix(evt.League?.Name, evt.Sport);
+        // STRICT: Sport prefix must match for known sports
+        // This prevents anime "Formula" from matching F1 "Formula 1"
         if (!string.IsNullOrEmpty(sportPrefix))
         {
-            query = query.Where(r => r.SportPrefix == null || r.SportPrefix == sportPrefix);
+            // For known sports, REQUIRE the sport prefix to match exactly
+            // Releases without a detected sport prefix won't match sports events
+            query = query.Where(r => r.SportPrefix == sportPrefix);
         }
 
         // Load candidates and do full matching in memory
