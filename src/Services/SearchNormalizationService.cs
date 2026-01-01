@@ -54,6 +54,8 @@ public static class SearchNormalizationService
         { "Losail", new[] { "Qatar", "Qatari" } },
         { "Termas de Rio Hondo", new[] { "Argentina", "Argentine", "Argentinian" } },
         { "Circuit of the Americas", new[] { "COTA", "Austin", "Texas", "United States", "American", "USA", "US" } },
+        // United States GP can be called many things - this is the primary entry for official F1 naming
+        { "United States", new[] { "USA", "US", "American", "COTA", "Circuit of the Americas", "Austin" } },
 
         // UFC / MMA Fight Night locations
         { "Riyadh", new[] { "Saudi Arabia", "Saudi" } },
@@ -76,7 +78,7 @@ public static class SearchNormalizationService
         { "Mexican", new[] { "Mexico", "Mexico City" } },
         { "Brazilian", new[] { "Brazil", "Sao Paulo", "Interlagos" } },
         { "Canadian", new[] { "Canada", "Montreal" } },
-        { "American", new[] { "United States", "USA", "US", "Austin", "Las Vegas", "Miami" } },
+        { "American", new[] { "United States", "USA", "US", "COTA", "Circuit of the Americas", "Austin", "Las Vegas", "Miami" } },
         { "Argentine", new[] { "Argentina", "Termas de Rio Hondo" } },
         { "Argentinian", new[] { "Argentina", "Termas de Rio Hondo" } },
 
