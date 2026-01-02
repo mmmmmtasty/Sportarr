@@ -8633,33 +8633,35 @@ app.MapPost("/api/event/{eventId:int}/search", async (
     }
 
     // MATCH SCORING: Calculate how well each release matches the event
-    // Releases that don't match the event (wrong game, TV shows, documentaries) are COMPLETELY EXCLUDED
+    // Releases that don't match the event (wrong game, TV shows, documentaries) are marked as rejected
     foreach (var result in allResults)
     {
         result.MatchScore = releaseMatchScorer.CalculateMatchScore(result.Title, evt);
+
+        // Mark non-matching releases as rejected (so UI "Hide Rejected" filter works)
+        if (result.MatchScore < Sportarr.Api.Services.ReleaseMatchScorer.MinimumMatchScore)
+        {
+            result.Approved = false;
+            result.Rejections.Add($"Release doesn't match event (score: {result.MatchScore})");
+        }
     }
 
-    // CRITICAL: Only keep releases that actually match this event
-    // Releases with score below threshold are COMPLETELY HIDDEN from the user
-    // This prevents showing wrong games, TV shows, documentaries, etc.
-    var matchingResults = allResults
-        .Where(r => r.MatchScore >= Sportarr.Api.Services.ReleaseMatchScorer.MinimumMatchScore)
-        .ToList();
-
-    var hiddenCount = allResults.Count - matchingResults.Count;
-    if (hiddenCount > 0)
+    var matchingCount = allResults.Count(r => r.MatchScore >= Sportarr.Api.Services.ReleaseMatchScorer.MinimumMatchScore);
+    var nonMatchingCount = allResults.Count - matchingCount;
+    if (nonMatchingCount > 0)
     {
-        logger.LogInformation("[SEARCH] Filtered out {Count} non-matching releases (score < {Threshold})",
-            hiddenCount, Sportarr.Api.Services.ReleaseMatchScorer.MinimumMatchScore);
+        logger.LogInformation("[SEARCH] {NonMatching} releases marked as non-matching (score < {Threshold}), {Matching} matching",
+            nonMatchingCount, Sportarr.Api.Services.ReleaseMatchScorer.MinimumMatchScore, matchingCount);
     }
 
     // Log match score distribution for debugging
-    if (matchingResults.Any())
+    if (matchingCount > 0)
     {
+        var matchingResults = allResults.Where(r => r.MatchScore >= Sportarr.Api.Services.ReleaseMatchScorer.MinimumMatchScore);
         var avgScore = matchingResults.Average(r => r.MatchScore);
         var maxScore = matchingResults.Max(r => r.MatchScore);
         logger.LogInformation("[SEARCH] Match scores: {Count} matching releases, avg={Avg:F0}, max={Max}",
-            matchingResults.Count, avgScore, maxScore);
+            matchingCount, avgScore, maxScore);
     }
 
     // Check blocklist status for each result (Sonarr-style: show blocked but mark them)
@@ -8668,7 +8670,7 @@ app.MapPost("/api/event/{eventId:int}/search", async (
         .ToListAsync();
     var blocklistLookup = blocklistHashes.ToDictionary(b => b.TorrentInfoHash, b => b.Message);
 
-    foreach (var result in matchingResults)
+    foreach (var result in allResults)
     {
         if (!string.IsNullOrEmpty(result.TorrentInfoHash) && blocklistLookup.ContainsKey(result.TorrentInfoHash))
         {
@@ -8679,17 +8681,18 @@ app.MapPost("/api/event/{eventId:int}/search", async (
     }
 
     // Sort results: by match score (best matches first), then quality score
-    // Rejected items (quality/size issues) appear at the bottom but are still visible
-    var sortedResults = matchingResults
-        .OrderBy(r => !r.Approved) // Approved first, rejected last
+    // Non-matching releases appear at the very bottom (visible when "Hide Rejected" is off)
+    var sortedResults = allResults
+        .OrderBy(r => r.MatchScore < Sportarr.Api.Services.ReleaseMatchScorer.MinimumMatchScore) // Matching first
+        .ThenBy(r => !r.Approved) // Approved first, rejected last
         .ThenBy(r => r.IsBlocklisted) // Non-blocklisted before blocklisted
         .ThenByDescending(r => r.MatchScore) // Best match scores first
         .ThenByDescending(r => r.Score) // Then by quality/CF score
         .ThenByDescending(r => GetPartRelevanceScore(r.Title, part))
         .ToList();
 
-    logger.LogInformation("[SEARCH] Search completed. Returning {Count} results ({Hidden} hidden non-matching, {Blocked} blocklisted)",
-        sortedResults.Count, hiddenCount, sortedResults.Count(r => r.IsBlocklisted));
+    logger.LogInformation("[SEARCH] Search completed. Returning {Count} results ({NonMatching} non-matching, {Blocked} blocklisted)",
+        sortedResults.Count, nonMatchingCount, sortedResults.Count(r => r.IsBlocklisted));
     return Results.Ok(sortedResults);
 });
 
