@@ -386,38 +386,128 @@ public class ReleaseMatchScorer
     }
 
     /// <summary>
-    /// Get fighting event match score (0-30 points).
+    /// Get fighting event match score (-50 to 40 points).
+    /// Handles: UFC PPV (UFC 299), Fight Nights, Dana White's Contender Series (DWCS), etc.
     /// </summary>
     private int GetFightingEventMatchScore(string releaseTitle, string eventTitle)
     {
         var normalizedRelease = NormalizeTitle(releaseTitle);
         var normalizedEvent = NormalizeTitle(eventTitle);
         var score = 0;
+        var hasEventIdentifier = false;
 
-        // Check for UFC/event number match (20 points)
-        var eventNumberMatch = Regex.Match(normalizedEvent, @"(?:ufc|bellator|pfl)\s*(?:fight\s*night\s*)?(\d+)", RegexOptions.IgnoreCase);
-        if (eventNumberMatch.Success)
+        // === DANA WHITE'S CONTENDER SERIES (DWCS) - Season/Episode based ===
+        // Event title: "Dana White's Contender Series S07E01" or "DWCS Season 7 Episode 1"
+        // Release title: "UFC.Dana.Whites.Contender.Series.S07E01" or "DWCS.S07E01"
+        var dwcsEventMatch = Regex.Match(normalizedEvent, @"(?:dana\s*white|dwcs|contender\s*series).*?(?:s(\d+)e(\d+)|season\s*(\d+).*?episode\s*(\d+))", RegexOptions.IgnoreCase);
+        if (dwcsEventMatch.Success)
         {
-            var eventNumber = eventNumberMatch.Groups[1].Value;
-            var releaseNumberMatch = Regex.Match(normalizedRelease, @"(?:ufc|bellator|pfl)\s*(?:fight\s*night\s*)?(\d+)", RegexOptions.IgnoreCase);
-            if (releaseNumberMatch.Success && releaseNumberMatch.Groups[1].Value == eventNumber)
-                score += 20;
-            else if (releaseNumberMatch.Success)
-                score -= 10; // Wrong event number is a penalty
+            hasEventIdentifier = true;
+            var eventSeason = dwcsEventMatch.Groups[1].Success ? dwcsEventMatch.Groups[1].Value : dwcsEventMatch.Groups[3].Value;
+            var eventEpisode = dwcsEventMatch.Groups[2].Success ? dwcsEventMatch.Groups[2].Value : dwcsEventMatch.Groups[4].Value;
+
+            // Check if release has matching season/episode
+            var dwcsReleaseMatch = Regex.Match(normalizedRelease, @"(?:dana\s*white|dwcs|contender\s*series).*?s(\d+)e(\d+)", RegexOptions.IgnoreCase);
+            if (dwcsReleaseMatch.Success)
+            {
+                var releaseSeason = dwcsReleaseMatch.Groups[1].Value;
+                var releaseEpisode = dwcsReleaseMatch.Groups[2].Value;
+
+                if (releaseSeason == eventSeason && releaseEpisode == eventEpisode)
+                    score += 30; // Strong match - correct season and episode
+                else if (releaseSeason == eventSeason)
+                    score -= 20; // Same season but wrong episode
+                else
+                    score -= 30; // Wrong season entirely
+            }
+            else
+            {
+                // Event is DWCS but release doesn't look like DWCS
+                return -50;
+            }
         }
 
-        // Key term matching (10 points max)
+        // === UFC PPV / Fight Night - Number based ===
+        // Event: "UFC 299" or "UFC Fight Night 240"
+        // Release: "UFC.299.Main.Card" or "UFC.Fight.Night.240"
+        var eventNumberMatch = Regex.Match(normalizedEvent, @"(?:ufc|bellator|pfl)\s*(?:fight\s*night\s*)?(\d+)", RegexOptions.IgnoreCase);
+        if (eventNumberMatch.Success && !hasEventIdentifier)
+        {
+            hasEventIdentifier = true;
+            var eventNumber = eventNumberMatch.Groups[1].Value;
+
+            // Check if event is specifically a "Fight Night" vs PPV
+            var eventIsFightNight = Regex.IsMatch(normalizedEvent, @"fight\s*night", RegexOptions.IgnoreCase);
+
+            var releaseNumberMatch = Regex.Match(normalizedRelease, @"(?:ufc|bellator|pfl)\s*(?:fight\s*night\s*)?(\d+)", RegexOptions.IgnoreCase);
+            if (releaseNumberMatch.Success)
+            {
+                var releaseNumber = releaseNumberMatch.Groups[1].Value;
+                var releaseIsFightNight = Regex.IsMatch(normalizedRelease, @"fight\s*night", RegexOptions.IgnoreCase);
+
+                if (releaseNumber == eventNumber)
+                {
+                    // Numbers match - but verify Fight Night vs PPV type matches
+                    if (eventIsFightNight == releaseIsFightNight)
+                        score += 25; // Perfect match
+                    else
+                        score += 15; // Number matches but type differs (could still be correct)
+                }
+                else
+                {
+                    score -= 30; // Wrong event number - definitely wrong event
+                }
+            }
+            else
+            {
+                // Event has a number but release doesn't - wrong release type
+                return -40;
+            }
+        }
+
+        // === Fighter name matching (for events named by headliners) ===
+        // Event: "UFC Fight Night: Covington vs Buckley"
+        // Release: "UFC.Fight.Night.Covington.vs.Buckley"
+        var vsMatch = Regex.Match(normalizedEvent, @"[:\s]([a-z]+)\s*(?:vs|v)\s*([a-z]+)", RegexOptions.IgnoreCase);
+        if (vsMatch.Success)
+        {
+            var fighter1 = vsMatch.Groups[1].Value.ToLowerInvariant();
+            var fighter2 = vsMatch.Groups[2].Value.ToLowerInvariant();
+
+            var hasFighter1 = normalizedRelease.Contains(fighter1, StringComparison.OrdinalIgnoreCase);
+            var hasFighter2 = normalizedRelease.Contains(fighter2, StringComparison.OrdinalIgnoreCase);
+
+            if (hasFighter1 && hasFighter2)
+                score += 15; // Both fighters match
+            else if (hasFighter1 || hasFighter2)
+                score += 5; // One fighter matches (might be on the card)
+        }
+
+        // === Generic term matching (fallback for non-standard naming) ===
         var eventWords = normalizedEvent.Split(' ', StringSplitOptions.RemoveEmptyEntries)
-            .Where(w => w.Length > 3 && !IsCommonWord(w))
+            .Where(w => w.Length > 3 && !IsCommonWord(w) && !IsFightingCommonWord(w))
             .ToList();
 
-        if (eventWords.Count > 0)
+        if (eventWords.Count > 0 && score == 0)
         {
             var matchCount = eventWords.Count(w => normalizedRelease.Contains(w, StringComparison.OrdinalIgnoreCase));
             score += (int)(10.0 * matchCount / eventWords.Count);
         }
 
-        return Math.Max(0, score);
+        return score;
+    }
+
+    /// <summary>
+    /// Check if a word is common in fighting sports (shouldn't be used for matching).
+    /// </summary>
+    private bool IsFightingCommonWord(string word)
+    {
+        var fightingCommon = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "ufc", "bellator", "pfl", "boxing", "mma", "fight", "night", "card",
+            "main", "prelims", "preliminary", "early", "dana", "white", "contender", "series"
+        };
+        return fightingCommon.Contains(word);
     }
 
     /// <summary>
