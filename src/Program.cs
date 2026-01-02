@@ -8642,17 +8642,11 @@ app.MapPost("/api/event/{eventId:int}/search", async (
             }
         }
 
-        // Cache the raw results for future searches
-        // Even force refresh results get cached (new cache replaces old, timer resets)
-        if (allResults.Count > 0)
-        {
-            searchResultCache.Store(primaryQuery, allResults);
-        }
     }
 
     // RELEASE EVALUATION: Apply quality profile and custom format scoring
     // For cached results: CF scores are already stored, only need part validation
-    // For fresh results: Run full evaluation
+    // For fresh results: IndexerSearchService already evaluated, but we re-run to ensure consistency
     if (qualityProfile != null && allResults.Count > 0)
     {
         if (usedCache)
@@ -8703,37 +8697,25 @@ app.MapPost("/api/event/{eventId:int}/search", async (
         }
         else
         {
-            // Fresh results from indexers - run full evaluation
-            var customFormats = await db.CustomFormats.ToListAsync();
-            var qualityDefinitions = await db.QualityDefinitions.ToListAsync();
-
-            logger.LogInformation("[SEARCH] Evaluating {Count} releases against quality profile '{Profile}' with {FormatCount} custom formats",
-                allResults.Count, qualityProfile.Name, customFormats.Count);
-
+            // Fresh results from indexers - IndexerSearchService already evaluated with quality profile
+            // Just set the part for tracking
             foreach (var release in allResults)
             {
-                var evaluation = releaseEvaluator.EvaluateRelease(
-                    release,
-                    qualityProfile,
-                    customFormats,
-                    qualityDefinitions,
-                    part,
-                    evt.Sport,
-                    config.EnableMultiPartEpisodes,
-                    evt.Title,
-                    null,  // runtimeMinutes
-                    release.IsPack);
-
-                // Update release with evaluation results
-                release.Score = evaluation.TotalScore;
-                release.QualityScore = evaluation.QualityScore;
-                release.CustomFormatScore = evaluation.CustomFormatScore;
-                release.SizeScore = evaluation.SizeScore;
-                release.Approved = evaluation.Approved;
-                release.Rejections = evaluation.Rejections;
-                release.MatchedFormats = evaluation.MatchedFormats;
-                release.Quality = evaluation.Quality;
                 release.Part = part;
+            }
+
+            // Cache the results AFTER they've been evaluated by IndexerSearchService
+            // The CF scores are already set, so future cache hits will have correct scores
+            if (allResults.Count > 0)
+            {
+                // Log sample scores to verify caching is working
+                var sampleRelease = allResults.FirstOrDefault();
+                if (sampleRelease != null)
+                {
+                    logger.LogInformation("[SEARCH] Caching {Count} evaluated releases. Sample: '{Title}' CF={CfScore}, Quality={Quality}",
+                        allResults.Count, sampleRelease.Title, sampleRelease.CustomFormatScore, sampleRelease.Quality);
+                }
+                searchResultCache.Store(primaryQuery, allResults);
             }
         }
     }
