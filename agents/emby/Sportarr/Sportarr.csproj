@@ -24,8 +24,12 @@
     <PackageReference Include="MediaBrowser.Server.Core" Version="4.9.1.90" />
   </ItemGroup>
 
-  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
-    <Exec Command="copy $(TargetPath) c:\users\zach\emby_stuff\" />
+  <Target Name="PackagePlugin" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
+	<ItemGroup>
+	  <PluginFiles Include="$(OutputPath)Emby.Plugins.Sportarr.dll" />
+	  <PluginFiles Include="$(OutputPath)Emby.Plugins.Sportarr.pdb" Condition="Exists('$(OutputPath)Emby.Plugins.Sportarr.pdb')" />
+	</ItemGroup>
+	<Copy SourceFiles="@(PluginFiles)" DestinationFolder="$(OutputPath)plugin" />
   </Target>
 
 </Project>
