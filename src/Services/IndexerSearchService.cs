@@ -179,26 +179,26 @@ public class IndexerSearchService
             {
                 await indexerSemaphore.WaitAsync();
 
-                // Update active count
+                // Update active count (ensure non-negative in case of race conditions)
                 lock (_statusLock)
                 {
                     if (_currentSearch != null)
-                        _currentSearch.ActiveIndexers = Math.Min(MaxConcurrentIndexerQueries, indexers.Count - _currentSearch.CompletedIndexers);
+                        _currentSearch.ActiveIndexers = Math.Max(0, Math.Min(MaxConcurrentIndexerQueries, indexers.Count - _currentSearch.CompletedIndexers));
                 }
 
                 try
                 {
                     var results = await SearchIndexerAsync(indexer, query, maxResultsPerIndexer);
 
-                    // Update status with results
+                    // Update status with results (ensure non-negative in case of race conditions)
                     lock (_statusLock)
                     {
                         if (_currentSearch != null)
                         {
                             _currentSearch.CompletedIndexers++;
                             _currentSearch.ReleasesFound += results.Count;
-                            _currentSearch.ActiveIndexers = Math.Min(MaxConcurrentIndexerQueries,
-                                indexers.Count - _currentSearch.CompletedIndexers);
+                            _currentSearch.ActiveIndexers = Math.Max(0, Math.Min(MaxConcurrentIndexerQueries,
+                                indexers.Count - _currentSearch.CompletedIndexers));
                         }
                     }
 
