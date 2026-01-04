@@ -51,9 +51,12 @@ public class ReleaseMatchingService
         @"\bpost[\s\.\-_]*match",            // post match, post-match, postmatch
         @"\bwarm[\s\.\-_]*up\b",             // warm up, warm-up, warmup (F1 pre-show content)
         @"\bweekend[\s\.\-_]*warm[\s\.\-_]*up", // weekend warm up (Sky F1 pre-show)
-        @"\bted'?s?[\s\.\-_]*(race[\s\.\-_]*)?notebook", // Ted's Notebook, Teds Race Notebook (Sky F1 post-race show)
+        @"\bted'?s?[\s\.\-_]*\w*[\s\.\-_]*notebook", // Ted's Notebook, Teds Race Notebook, Teds Qualifying Notebook (Sky F1 shows)
         @"\bted[\s\.\-_]*kravitz",           // Ted Kravitz (Sky F1 presenter, usually non-race content)
-        @"\brace[\s\.\-_]*notebook",         // Race Notebook (generic pattern)
+        @"\b\w+[\s\.\-_]*notebook",          // Any Notebook (Race Notebook, Qualifying Notebook, etc.)
+        @"\bpaddock[\s\.\-_]*uncut",         // Paddock Uncut (Sky F1 paddock access show)
+        @"\bchequered[\s\.\-_]*flag",        // Chequered Flag (Sky F1 post-race review show)
+        @"\bfull[\s\.\-_]*weekend",          // Full Weekend compilations (not specific sessions)
         @"\bweigh[\s\.\-_]*in",              // weigh in, weigh-in, weighin
         @"\bfaceoff",                        // faceoff, face-off
         @"\bface[\s\.\-_]*off",              // face off, face-off
@@ -800,6 +803,12 @@ public class ReleaseMatchingService
                     return "Warm-up Show";
                 if (detected.Contains("notebook") || detected.Contains("kravitz"))
                     return "Ted's Notebook";
+                if (detected.Contains("paddock") && detected.Contains("uncut"))
+                    return "Paddock Uncut";
+                if (detected.Contains("chequered") && detected.Contains("flag"))
+                    return "Chequered Flag";
+                if (detected.Contains("full") && detected.Contains("weekend"))
+                    return "Full Weekend Compilation";
 
                 return detected; // Fallback to matched text
             }
