@@ -24,11 +24,12 @@ public class DynamicAuthenticationMiddleware
         var path = context.Request.Path.Value?.ToLower() ?? string.Empty;
 
         // Log Prowlarr requests for debugging
+        // Sanitize user-controlled values to prevent log injection attacks
         if (path.StartsWith("/api/v1/"))
         {
-            logger.LogInformation("[PROWLARR MIDDLEWARE] Request to {Path}", path);
+            logger.LogInformation("[PROWLARR MIDDLEWARE] Request to {Path}", SanitizeForLog(path));
             logger.LogInformation("[PROWLARR MIDDLEWARE] Headers: {Headers}",
-                string.Join(", ", context.Request.Headers.Select(h => $"{h.Key}={h.Value}")));
+                string.Join(", ", context.Request.Headers.Select(h => $"{SanitizeForLog(h.Key)}={SanitizeForLog(h.Value)}")));
         }
 
         // Allow public paths
@@ -268,6 +269,20 @@ public class DynamicAuthenticationMiddleware
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Sanitize user-controlled input for logging to prevent log injection attacks.
+    /// </summary>
+    private static string SanitizeForLog(string? input)
+    {
+        if (string.IsNullOrEmpty(input))
+            return string.Empty;
+
+        return input
+            .Replace("\r", "")
+            .Replace("\n", "")
+            .Replace("\t", " ");
     }
 }
 

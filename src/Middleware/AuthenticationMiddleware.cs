@@ -135,7 +135,12 @@ public class AuthenticationMiddleware
     private async Task<bool> TryBasicAuthAsync(HttpContext context, AuthenticationService authService)
     {
         var authHeader = context.Request.Headers["Authorization"].FirstOrDefault();
-        if (string.IsNullOrEmpty(authHeader) || !authHeader.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
+
+        // Validate Authorization header exists and has correct format
+        // Use defensive length check to prevent DoS via oversized headers
+        if (string.IsNullOrEmpty(authHeader) ||
+            authHeader.Length > 8192 ||  // Reasonable max length for Basic auth header
+            !authHeader.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
@@ -143,7 +148,24 @@ public class AuthenticationMiddleware
         try
         {
             var encodedCredentials = authHeader.Substring("Basic ".Length).Trim();
-            var credentialBytes = Convert.FromBase64String(encodedCredentials);
+
+            // Validate base64 string before decoding to prevent invalid input attacks
+            if (string.IsNullOrEmpty(encodedCredentials) || encodedCredentials.Length > 4096)
+            {
+                return false;
+            }
+
+            byte[] credentialBytes;
+            try
+            {
+                credentialBytes = Convert.FromBase64String(encodedCredentials);
+            }
+            catch (FormatException)
+            {
+                // Invalid base64 - return false without exposing error details
+                return false;
+            }
+
             var credentials = System.Text.Encoding.UTF8.GetString(credentialBytes);
             var parts = credentials.Split(':', 2);
 
@@ -154,6 +176,13 @@ public class AuthenticationMiddleware
 
             var username = parts[0];
             var password = parts[1];
+
+            // Validate credentials aren't empty or excessively long
+            if (string.IsNullOrEmpty(username) || username.Length > 256 ||
+                string.IsNullOrEmpty(password) || password.Length > 256)
+            {
+                return false;
+            }
 
             var ipAddress = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
             var userAgent = context.Request.Headers["User-Agent"].ToString();
@@ -170,6 +199,7 @@ public class AuthenticationMiddleware
         }
         catch
         {
+            // Catch-all for any unexpected errors - fail closed
             return false;
         }
     }

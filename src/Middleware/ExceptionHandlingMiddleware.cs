@@ -129,12 +129,14 @@ public class ExceptionHandlingMiddleware
         }
 
         // Log the error with appropriate level
+        // Sanitize user-controlled path to prevent log injection attacks
+        var sanitizedPath = SanitizeForLog(errorResponse.Path);
         if (errorResponse.StatusCode >= 500)
         {
             _logger.LogError(exception,
                 "[{ErrorId}] Server error on {Path}: {Message}",
                 errorResponse.ErrorId,
-                errorResponse.Path,
+                sanitizedPath,
                 exception.Message);
         }
         else if (errorResponse.StatusCode >= 400)
@@ -142,11 +144,28 @@ public class ExceptionHandlingMiddleware
             _logger.LogWarning(
                 "[{ErrorId}] Client error on {Path}: {Message}",
                 errorResponse.ErrorId,
-                errorResponse.Path,
+                sanitizedPath,
                 exception.Message);
         }
 
         return errorResponse;
+    }
+
+    /// <summary>
+    /// Sanitize user-controlled input for logging to prevent log injection attacks.
+    /// Removes newlines, carriage returns, and other control characters that could
+    /// be used to forge log entries.
+    /// </summary>
+    private static string SanitizeForLog(string? input)
+    {
+        if (string.IsNullOrEmpty(input))
+            return string.Empty;
+
+        // Replace control characters that could be used for log injection
+        return input
+            .Replace("\r", "")
+            .Replace("\n", "")
+            .Replace("\t", " ");
     }
 }
 

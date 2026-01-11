@@ -81,8 +81,9 @@ public class ApiKeyAuthenticationHandler : AuthenticationHandler<ApiKeyAuthentic
         if (providedKey != apiKey)
         {
             // Use Debug level to avoid log spam from external tools polling with wrong keys
-            Logger.LogDebug("[API KEY AUTH] API key mismatch! Provided: {Provided}...",
-                providedKey?.Substring(0, Math.Min(8, providedKey.Length)));
+            // Sanitize user input to prevent log injection attacks
+            var sanitizedKeyPreview = SanitizeForLog(providedKey?.Substring(0, Math.Min(8, providedKey?.Length ?? 0)));
+            Logger.LogDebug("[API KEY AUTH] API key mismatch! Provided: {Provided}...", sanitizedKeyPreview);
             return AuthenticateResult.NoResult();
         }
 
@@ -111,5 +112,19 @@ public class ApiKeyAuthenticationHandler : AuthenticationHandler<ApiKeyAuthentic
     {
         Response.StatusCode = 403;
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Sanitize user-controlled input for logging to prevent log injection attacks.
+    /// </summary>
+    private static string SanitizeForLog(string? input)
+    {
+        if (string.IsNullOrEmpty(input))
+            return string.Empty;
+
+        return input
+            .Replace("\r", "")
+            .Replace("\n", "")
+            .Replace("\t", " ");
     }
 }
