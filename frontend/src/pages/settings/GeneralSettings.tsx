@@ -1026,7 +1026,9 @@ export default function GeneralSettings({ showAdvanced = false }: GeneralSetting
               <p>4. Catalog → Metadata → Install Sportarr → Restart Jellyfin</p>
             </div>
             <a
-              href="/api/system/agents/jellyfin/download"
+              href="https://github.com/Sportarr/Sportarr/releases/latest"
+              target="_blank"
+              rel="noopener noreferrer"
               className="inline-flex items-center px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded-lg transition-colors w-fit mt-auto"
             >
               <ArrowDownTrayIcon className="w-4 h-4 mr-2" />
@@ -1050,7 +1052,9 @@ export default function GeneralSettings({ showAdvanced = false }: GeneralSetting
               <p>4. Create a Shows library and enable Sportarr metadata</p>
             </div>
             <a
-              href="/api/system/agents/emby/download"
+              href="https://github.com/Sportarr/Sportarr/releases/latest"
+              target="_blank"
+              rel="noopener noreferrer"
               className="inline-flex items-center px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-sm rounded-lg transition-colors w-fit mt-auto"
             >
               <ArrowDownTrayIcon className="w-4 h-4 mr-2" />
