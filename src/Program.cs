@@ -764,6 +764,36 @@ try
             Console.WriteLine($"[Sportarr] Warning: Could not verify EnableMultiPartEpisodes column: {ex.Message}");
         }
 
+        // Ensure granular folder format/creation columns exist in MediaManagementSettings
+        // These were added after some installs and may be missing from older databases
+        try
+        {
+            var columnsToAdd = new[]
+            {
+                ("LeagueFolderFormat", "TEXT NOT NULL DEFAULT '{Series}'"),
+                ("SeasonFolderFormat", "TEXT NOT NULL DEFAULT 'Season {Season}'"),
+                ("CreateLeagueFolders", "INTEGER NOT NULL DEFAULT 1"),
+                ("CreateSeasonFolders", "INTEGER NOT NULL DEFAULT 1"),
+                ("ReorganizeFolders", "INTEGER NOT NULL DEFAULT 0"),
+            };
+
+            foreach (var (columnName, columnDef) in columnsToAdd)
+            {
+                var checkSql = $"SELECT COUNT(*) FROM pragma_table_info('MediaManagementSettings') WHERE name='{columnName}'";
+                var exists = db.Database.SqlQueryRaw<int>(checkSql).AsEnumerable().FirstOrDefault();
+                if (exists == 0)
+                {
+                    Console.WriteLine($"[Sportarr] Adding missing column {columnName} to MediaManagementSettings...");
+                    db.Database.ExecuteSqlRaw($@"ALTER TABLE ""MediaManagementSettings"" ADD COLUMN ""{columnName}"" {columnDef}");
+                    Console.WriteLine($"[Sportarr] Column {columnName} added successfully");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Sportarr] Warning: Could not add missing MediaManagementSettings columns: {ex.Message}");
+        }
+
         // Remove deprecated StandardEventFormat column if it exists (backwards compatibility fix)
         // This column was removed but migration may not have run properly on some databases
         try
@@ -782,10 +812,15 @@ try
                         RenameFiles INTEGER NOT NULL DEFAULT 1,
                         StandardFileFormat TEXT NOT NULL DEFAULT '{Series} - {Season}{Episode}{Part} - {Event Title} - {Quality Full}',
                         EventFolderFormat TEXT NOT NULL DEFAULT '{Event Title}',
+                        LeagueFolderFormat TEXT NOT NULL DEFAULT '{Series}',
+                        SeasonFolderFormat TEXT NOT NULL DEFAULT 'Season {Season}',
                         CreateEventFolder INTEGER NOT NULL DEFAULT 1,
                         RenameEvents INTEGER NOT NULL DEFAULT 0,
                         ReplaceIllegalCharacters INTEGER NOT NULL DEFAULT 1,
+                        CreateLeagueFolders INTEGER NOT NULL DEFAULT 1,
+                        CreateSeasonFolders INTEGER NOT NULL DEFAULT 1,
                         CreateEventFolders INTEGER NOT NULL DEFAULT 1,
+                        ReorganizeFolders INTEGER NOT NULL DEFAULT 0,
                         DeleteEmptyFolders INTEGER NOT NULL DEFAULT 0,
                         SkipFreeSpaceCheck INTEGER NOT NULL DEFAULT 0,
                         MinimumFreeSpace INTEGER NOT NULL DEFAULT 100,
@@ -823,19 +858,23 @@ try
                 {
                     cmd.CommandText = @"
                         INSERT OR REPLACE INTO MediaManagementSettings_new (
-                            Id, RenameFiles, StandardFileFormat, EventFolderFormat, CreateEventFolder,
-                            RenameEvents, ReplaceIllegalCharacters, CreateEventFolders, DeleteEmptyFolders,
-                            SkipFreeSpaceCheck, MinimumFreeSpace, UseHardlinks, ImportExtraFiles,
-                            ExtraFileExtensions, ChangeFileDate, RecycleBin, RecycleBinCleanup,
+                            Id, RenameFiles, StandardFileFormat, EventFolderFormat,
+                            LeagueFolderFormat, SeasonFolderFormat,
+                            CreateEventFolder, RenameEvents, ReplaceIllegalCharacters,
+                            CreateLeagueFolders, CreateSeasonFolders, CreateEventFolders, ReorganizeFolders,
+                            DeleteEmptyFolders, SkipFreeSpaceCheck, MinimumFreeSpace, UseHardlinks,
+                            ImportExtraFiles, ExtraFileExtensions, ChangeFileDate, RecycleBin, RecycleBinCleanup,
                             SetPermissions, FileChmod, ChmodFolder, ChownUser, ChownGroup,
                             CopyFiles, RemoveCompletedDownloads, RemoveFailedDownloads, Created, LastModified,
                             EnableMultiPartEpisodes, RootFolders
                         )
                         SELECT
-                            Id, RenameFiles, StandardFileFormat, EventFolderFormat, CreateEventFolder,
-                            RenameEvents, ReplaceIllegalCharacters, CreateEventFolders, DeleteEmptyFolders,
-                            SkipFreeSpaceCheck, MinimumFreeSpace, UseHardlinks, ImportExtraFiles,
-                            ExtraFileExtensions, ChangeFileDate, RecycleBin, RecycleBinCleanup,
+                            Id, RenameFiles, StandardFileFormat, EventFolderFormat,
+                            COALESCE(LeagueFolderFormat, '{Series}'), COALESCE(SeasonFolderFormat, 'Season {Season}'),
+                            CreateEventFolder, RenameEvents, ReplaceIllegalCharacters,
+                            COALESCE(CreateLeagueFolders, 1), COALESCE(CreateSeasonFolders, 1), CreateEventFolders, COALESCE(ReorganizeFolders, 0),
+                            DeleteEmptyFolders, SkipFreeSpaceCheck, MinimumFreeSpace, UseHardlinks,
+                            ImportExtraFiles, ExtraFileExtensions, ChangeFileDate, RecycleBin, RecycleBinCleanup,
                             SetPermissions, FileChmod, ChmodFolder, ChownUser, ChownGroup,
                             CopyFiles, RemoveCompletedDownloads, RemoveFailedDownloads, Created, LastModified,
                             COALESCE(EnableMultiPartEpisodes, 1), COALESCE(RootFolders, '[]')
@@ -4449,6 +4488,8 @@ app.MapGet("/api/settings", async (Sportarr.Api.Services.ConfigService configSer
 app.MapPut("/api/settings", async (AppSettings updatedSettings, Sportarr.Api.Services.ConfigService configService, Sportarr.Api.Services.SimpleAuthService simpleAuthService, SportarrDbContext db, Sportarr.Api.Services.FileFormatManager fileFormatManager, ILogger<Program> logger) =>
 {
     logger.LogInformation("[CONFIG] Settings update requested");
+    try
+    {
 
     var jsonOptions = new System.Text.Json.JsonSerializerOptions
     {
@@ -4830,6 +4871,12 @@ app.MapPut("/api/settings", async (AppSettings updatedSettings, Sportarr.Api.Ser
 
     logger.LogInformation("[CONFIG] Settings saved to config.xml successfully");
     return Results.Ok(updatedSettings);
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "[CONFIG] Failed to save settings");
+        return Results.Problem($"Failed to save settings: {ex.Message}");
+    }
 });
 
 // API: Regenerate API Key (Sonarr pattern - no restart required)
