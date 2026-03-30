@@ -2725,10 +2725,21 @@ app.MapGet("/api/library/leagues/{leagueId:int}/events", async (
             query = query.Where(e => e.Season == season);
         }
 
-        // Server-side search - search across title, team names, venue, season
+        // Server-side search - search across title, team names, venue, season, date, episode number
         if (!string.IsNullOrEmpty(search))
         {
             var searchLower = search.ToLower();
+
+            // Check if search is a date (try common formats)
+            DateTime? searchDate = null;
+            if (DateTime.TryParse(search, out var parsedDate))
+            {
+                searchDate = parsedDate.Date;
+            }
+
+            // Check if search is an episode number
+            int? searchEpisode = int.TryParse(search, out var ep) ? ep : null;
+
             query = query.Where(e =>
                 e.Title.ToLower().Contains(searchLower) ||
                 (e.HomeTeamName != null && e.HomeTeamName.ToLower().Contains(searchLower)) ||
@@ -2737,7 +2748,9 @@ app.MapGet("/api/library/leagues/{leagueId:int}/events", async (
                 (e.AwayTeam != null && e.AwayTeam.Name.ToLower().Contains(searchLower)) ||
                 (e.Venue != null && e.Venue.ToLower().Contains(searchLower)) ||
                 (e.Season != null && e.Season.ToLower().Contains(searchLower)) ||
-                (e.ExternalId != null && e.ExternalId.ToLower().Contains(searchLower))
+                (e.ExternalId != null && e.ExternalId.ToLower().Contains(searchLower)) ||
+                (searchDate != null && e.EventDate.Date == searchDate.Value) ||
+                (searchEpisode != null && e.EpisodeNumber == searchEpisode.Value)
             );
         }
 
