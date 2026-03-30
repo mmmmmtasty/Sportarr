@@ -133,6 +133,12 @@ export default function ManualImportModal({ pendingImport, onClose, onSuccess }:
   // View mode - show AI suggestions or manual selection
   const [showAISuggestions, setShowAISuggestions] = useState(true);
 
+  // Resolved suggested event (fetched by ID when not provided inline)
+  const [resolvedSuggestedEvent, setResolvedSuggestedEvent] = useState<Event | null>(null);
+
+  // Use inline suggestedEvent if available, otherwise fall back to fetched event
+  const suggestedEvent = pendingImport.suggestedEvent || resolvedSuggestedEvent;
+
   // Debounce search input for server-side search
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -147,12 +153,35 @@ export default function ManualImportModal({ pendingImport, onClose, onSuccess }:
     loadAllMatches();
   }, []);
 
+  // Fetch suggested event by ID if not provided inline
+  useEffect(() => {
+    if (pendingImport.suggestedEventId && !pendingImport.suggestedEvent) {
+      (async () => {
+        try {
+          const response = await apiGet(`/api/events/${pendingImport.suggestedEventId}`);
+          if (response.ok) {
+            const event = await response.json();
+            setResolvedSuggestedEvent(event);
+            if (event.league?.id && !selectedLeagueId) {
+              setSelectedLeagueId(event.league.id);
+            }
+            if (event.season && !selectedSeason) {
+              setSelectedSeason(event.season);
+            }
+          }
+        } catch {
+          // Suggestion unavailable, user can still select manually
+        }
+      })();
+    }
+  }, [pendingImport.suggestedEventId]);
+
   // Load seasons when league changes
   useEffect(() => {
     if (selectedLeagueId) {
       loadSeasons(selectedLeagueId);
       // Only reset if user manually changed league (not initial load)
-      if (!pendingImport.suggestedEvent?.league?.id || selectedLeagueId !== pendingImport.suggestedEvent.league.id) {
+      if (!suggestedEvent?.league?.id || selectedLeagueId !== suggestedEvent.league.id) {
         setSelectedSeason(null);
         setSelectedEventId(null);
         setEvents([]);
@@ -416,8 +445,8 @@ export default function ManualImportModal({ pendingImport, onClose, onSuccess }:
           </div>
 
           {/* AI Suggestions Section */}
-          {(pendingImport.suggestedEvent || allMatches.length > 0) && showAISuggestions && (
-            <div className={`rounded-lg p-4 border ${pendingImport.suggestedEvent ? getConfidenceBg(pendingImport.suggestionConfidence) : 'bg-gray-800/50 border-gray-700'}`}>
+          {(suggestedEvent || allMatches.length > 0) && showAISuggestions && (
+            <div className={`rounded-lg p-4 border ${suggestedEvent ? getConfidenceBg(pendingImport.suggestionConfidence) : 'bg-gray-800/50 border-gray-700'}`}>
               <div className="flex items-start justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <CheckCircleIcon className="w-5 h-5 text-green-400" />
@@ -432,14 +461,14 @@ export default function ManualImportModal({ pendingImport, onClose, onSuccess }:
               </div>
 
               {/* Top suggestion */}
-              {pendingImport.suggestedEvent && (
+              {suggestedEvent && (
                 <div
                   onClick={() => selectFromSuggestion({
                     eventId: pendingImport.suggestedEventId,
-                    eventTitle: pendingImport.suggestedEvent?.title,
-                    league: pendingImport.suggestedEvent?.league?.name,
-                    leagueId: pendingImport.suggestedEvent?.league?.id,
-                    season: pendingImport.suggestedEvent?.season,
+                    eventTitle: suggestedEvent?.title,
+                    league: suggestedEvent?.league?.name,
+                    leagueId: suggestedEvent?.league?.id,
+                    season: suggestedEvent?.season,
                     part: pendingImport.suggestedPart,
                     confidence: pendingImport.suggestionConfidence
                   })}
@@ -451,10 +480,10 @@ export default function ManualImportModal({ pendingImport, onClose, onSuccess }:
                 >
                   <div className="flex items-center justify-between">
                     <div>
-                      <div className="text-white font-medium">{pendingImport.suggestedEvent.title}</div>
+                      <div className="text-white font-medium">{suggestedEvent.title}</div>
                       <div className="text-sm text-gray-400">
-                        {pendingImport.suggestedEvent.league?.name || pendingImport.suggestedEvent.organization}
-                        {pendingImport.suggestedEvent.season && ` • ${pendingImport.suggestedEvent.season}`}
+                        {suggestedEvent.league?.name || suggestedEvent.organization}
+                        {suggestedEvent.season && ` • ${suggestedEvent.season}`}
                       </div>
                       {pendingImport.suggestedPart && (
                         <div className="text-sm text-blue-400 mt-1">
@@ -514,7 +543,7 @@ export default function ManualImportModal({ pendingImport, onClose, onSuccess }:
                 <MagnifyingGlassIcon className="w-5 h-5 text-gray-400" />
                 {showAISuggestions ? 'Or Select Manually' : 'Select Event'}
               </h4>
-              {!showAISuggestions && (pendingImport.suggestedEvent || allMatches.length > 0) && (
+              {!showAISuggestions && (suggestedEvent || allMatches.length > 0) && (
                 <button
                   onClick={() => setShowAISuggestions(true)}
                   className="text-xs text-blue-400 hover:text-blue-300"
@@ -719,7 +748,7 @@ export default function ManualImportModal({ pendingImport, onClose, onSuccess }:
           )}
 
           {/* No Selection Warning */}
-          {!selectedEventId && !pendingImport.suggestedEvent && allMatches.length === 0 && (
+          {!selectedEventId && !suggestedEvent && allMatches.length === 0 && (
             <div className="bg-yellow-900/20 border border-yellow-700/50 rounded-lg p-4">
               <div className="flex items-center gap-2">
                 <ExclamationTriangleIcon className="w-5 h-5 text-yellow-400" />
