@@ -494,6 +494,27 @@ public class ReleaseMatchingService
             result.Rejections.Add($"Release specifies Day {releaseDayNumber} but event has no day indicator");
         }
 
+        // VALIDATION 6e: Motorsport pre-season testing vs race weekend mismatch
+        // "Bahrain Pre Season Testing Day One" should NOT match "Bahrain Grand Prix"
+        if (isMotorsport)
+        {
+            var releaseIsTest = Regex.IsMatch(normalizedRelease, @"\bpre[\s\.\-_]*season[\s\.\-_]*test", RegexOptions.IgnoreCase) ||
+                                Regex.IsMatch(normalizedRelease, @"\btest[\s\.\-_]*day\b", RegexOptions.IgnoreCase);
+            var eventIsTest = Regex.IsMatch(normalizedEvent, @"\bpre[\s\.\-_]*season[\s\.\-_]*test", RegexOptions.IgnoreCase) ||
+                              Regex.IsMatch(normalizedEvent, @"\btest[\s\.\-_]*day\b", RegexOptions.IgnoreCase);
+
+            if (releaseIsTest != eventIsTest)
+            {
+                result.Confidence -= 100;
+                result.IsHardRejection = true;
+                result.Rejections.Add(releaseIsTest
+                    ? "Release is pre-season testing but event is a race weekend"
+                    : "Release is a race weekend but event is pre-season testing");
+                _logger.LogDebug("[Release Matching] Hard rejection: pre-season testing vs race weekend mismatch: '{Release}' vs '{Event}'",
+                    release.Title, evt.Title);
+            }
+        }
+
         // VALIDATION 7: Word overlap between titles
         var wordOverlap = CalculateWordOverlap(normalizedRelease, normalizedEvent);
         result.Confidence += (int)(wordOverlap * 20);
