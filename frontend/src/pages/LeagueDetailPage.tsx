@@ -870,7 +870,7 @@ export default function LeagueDetailPage() {
 
         // Refresh league data to show new events
         queryClient.invalidateQueries({ queryKey: ['league', id] });
-        queryClient.invalidateQueries({ queryKey: ['league', id, 'events'] });
+        queryClient.invalidateQueries({ queryKey: ['league-events', id] });
         queryClient.invalidateQueries({ queryKey: ['leagues'] }); // Update league stats
       } else {
         toast.error('Failed to refresh events', {
