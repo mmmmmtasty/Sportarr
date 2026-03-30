@@ -2725,10 +2725,21 @@ app.MapGet("/api/library/leagues/{leagueId:int}/events", async (
             query = query.Where(e => e.Season == season);
         }
 
-        // Server-side search - search across title, team names, venue, season
+        // Server-side search - search across title, team names, venue, season, date, episode number
         if (!string.IsNullOrEmpty(search))
         {
             var searchLower = search.ToLower();
+
+            // Check if search is a date (try common formats)
+            DateTime? searchDate = null;
+            if (DateTime.TryParse(search, out var parsedDate))
+            {
+                searchDate = parsedDate.Date;
+            }
+
+            // Check if search is an episode number
+            int? searchEpisode = int.TryParse(search, out var ep) ? ep : null;
+
             query = query.Where(e =>
                 e.Title.ToLower().Contains(searchLower) ||
                 (e.HomeTeamName != null && e.HomeTeamName.ToLower().Contains(searchLower)) ||
@@ -2737,7 +2748,9 @@ app.MapGet("/api/library/leagues/{leagueId:int}/events", async (
                 (e.AwayTeam != null && e.AwayTeam.Name.ToLower().Contains(searchLower)) ||
                 (e.Venue != null && e.Venue.ToLower().Contains(searchLower)) ||
                 (e.Season != null && e.Season.ToLower().Contains(searchLower)) ||
-                (e.ExternalId != null && e.ExternalId.ToLower().Contains(searchLower))
+                (e.ExternalId != null && e.ExternalId.ToLower().Contains(searchLower)) ||
+                (searchDate != null && e.EventDate.Date == searchDate.Value) ||
+                (searchEpisode != null && e.EpisodeNumber == searchEpisode.Value)
             );
         }
 
@@ -3698,6 +3711,18 @@ app.MapPost("/api/customformat", async (CustomFormat format, SportarrDbContext d
     format.Created = DateTime.UtcNow;
     db.CustomFormats.Add(format);
     await db.SaveChangesAsync();
+
+    // Add the new format to all existing quality profiles with score 0
+    var profiles = await db.QualityProfiles.Include(p => p.FormatItems).ToListAsync();
+    foreach (var profile in profiles)
+    {
+        if (!profile.FormatItems.Any(fi => fi.FormatId == format.Id))
+        {
+            profile.FormatItems.Add(new ProfileFormatItem { FormatId = format.Id, Score = 0 });
+        }
+    }
+    await db.SaveChangesAsync();
+
     cfCache.InvalidateAll(); // Invalidate CF match cache
     return Results.Ok(format);
 });
@@ -3746,6 +3771,12 @@ app.MapDelete("/api/customformat/{id}", async (int id, SportarrDbContext db, Spo
 {
     var format = await db.CustomFormats.FindAsync(id);
     if (format == null) return Results.NotFound();
+
+    // Remove format score entries from all quality profiles
+    var orphanedItems = await db.Set<ProfileFormatItem>()
+        .Where(fi => fi.FormatId == id)
+        .ToListAsync();
+    db.RemoveRange(orphanedItems);
 
     db.CustomFormats.Remove(format);
     await db.SaveChangesAsync();
@@ -3858,6 +3889,18 @@ app.MapPost("/api/customformat/import", async (JsonElement jsonData, SportarrDbC
 
         db.CustomFormats.Add(format);
         await db.SaveChangesAsync();
+
+        // Add the imported format to all existing quality profiles
+        var profiles = await db.QualityProfiles.Include(p => p.FormatItems).ToListAsync();
+        foreach (var profile in profiles)
+        {
+            if (!profile.FormatItems.Any(fi => fi.FormatId == format.Id))
+            {
+                profile.FormatItems.Add(new ProfileFormatItem { FormatId = format.Id, Score = defaultScore ?? 0 });
+            }
+        }
+        await db.SaveChangesAsync();
+
         cfCache.InvalidateAll(); // Invalidate CF match cache
 
         logger.LogInformation("[CUSTOM FORMAT] Imported format '{Name}' with {SpecCount} specifications (default score: {Score})",

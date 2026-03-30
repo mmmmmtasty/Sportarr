@@ -166,9 +166,18 @@ public class FileWatcherService : BackgroundService
 
     private void OnFileRenamed(object sender, RenamedEventArgs e)
     {
+        // Handle video-to-video renames by updating existing records in place
+        if (IsVideoFile(e.OldFullPath) && IsVideoFile(e.FullPath))
+        {
+            _ = HandleRenamedFileAsync(e.OldFullPath, e.FullPath);
+            return;
+        }
+
+        // Non-video renamed to video = new file
         if (IsVideoFile(e.FullPath))
             DebouncedHandleNewFile(e.FullPath);
 
+        // Video renamed to non-video = deleted
         if (IsVideoFile(e.OldFullPath))
             _ = HandleDeletedFileAsync(e.OldFullPath);
     }
@@ -310,6 +319,61 @@ public class FileWatcherService : BackgroundService
         catch (Exception ex)
         {
             _logger.LogError(ex, "[File Watcher] Error handling new file: {Path}", filePath);
+        }
+    }
+
+    private async Task HandleRenamedFileAsync(string oldPath, string newPath)
+    {
+        try
+        {
+            if (!File.Exists(newPath)) return;
+
+            using var scope = _serviceProvider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<SportarrDbContext>();
+
+            var updated = false;
+
+            // Update EventFile record if the old path is tracked there
+            var eventFile = await db.EventFiles.FirstOrDefaultAsync(ef => ef.FilePath == oldPath);
+            if (eventFile != null)
+            {
+                eventFile.FilePath = newPath;
+                eventFile.LastVerified = DateTime.UtcNow;
+
+                // Also update the parent Event's FilePath if it points to the old path
+                var evt = await db.Events.FindAsync(eventFile.EventId);
+                if (evt != null && evt.FilePath == oldPath)
+                {
+                    evt.FilePath = newPath;
+                }
+
+                updated = true;
+                _logger.LogInformation("[File Watcher] File renamed (EventFile updated): {OldPath} -> {NewPath}", oldPath, newPath);
+            }
+
+            // Update Event direct file path if tracked there
+            var directEvent = await db.Events.FirstOrDefaultAsync(e => e.FilePath == oldPath);
+            if (directEvent != null)
+            {
+                directEvent.FilePath = newPath;
+                updated = true;
+                _logger.LogInformation("[File Watcher] File renamed (Event updated): {OldPath} -> {NewPath}", oldPath, newPath);
+            }
+
+            if (updated)
+            {
+                await db.SaveChangesAsync();
+            }
+            else
+            {
+                // Old path wasn't tracked, treat new path as a new file
+                _logger.LogDebug("[File Watcher] Renamed file not tracked, treating as new: {Path}", newPath);
+                await HandleNewFileAsync(newPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[File Watcher] Error handling renamed file: {OldPath} -> {NewPath}", oldPath, newPath);
         }
     }
 

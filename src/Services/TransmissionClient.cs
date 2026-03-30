@@ -15,6 +15,8 @@ public class TransmissionClient
     private readonly HttpClient _httpClient;
     private readonly ILogger<TransmissionClient> _logger;
     private string? _sessionId;
+    private string? _baseUrl;
+    private string? _authCredentials;
     private HttpClient? _customHttpClient; // For SSL bypass
 
     public TransmissionClient(HttpClient httpClient, ILogger<TransmissionClient> logger)
@@ -94,12 +96,16 @@ public class TransmissionClient
             {
                 _logger.LogInformation("[Transmission] Adding torrent in STOPPED state (InitialState=Stopped)");
             }
-            var arguments = new
+            object arguments;
+            if (!string.IsNullOrWhiteSpace(config.Directory))
             {
-                filename = torrentUrl,
-                paused = shouldPause
-                // labels = new[] { category } // Only works with Transmission 3.0+
-            };
+                arguments = new { filename = torrentUrl, paused = shouldPause, download_dir = config.Directory };
+                _logger.LogInformation("[Transmission] Using directory override: {Directory}", config.Directory);
+            }
+            else
+            {
+                arguments = new { filename = torrentUrl, paused = shouldPause };
+            }
 
             var response = await SendRpcRequestAsync(config, "torrent-add", arguments);
 
@@ -354,26 +360,18 @@ public class TransmissionClient
 
     private void ConfigureClient(DownloadClient config)
     {
-        var client = GetHttpClient(config);
         var protocol = config.UseSsl ? "https" : "http";
-
-        // Transmission RPC typically runs at /transmission/rpc
-        // Use configured URL base or default to "/transmission" for backward compatibility
         var urlBase = string.IsNullOrEmpty(config.UrlBase) ? "/transmission" : config.UrlBase;
 
-        // Ensure urlBase starts with / and doesn't end with /
         if (!urlBase.StartsWith("/"))
-        {
             urlBase = "/" + urlBase;
-        }
         urlBase = urlBase.TrimEnd('/');
 
-        client.BaseAddress = new Uri($"{protocol}://{config.Host}:{config.Port}{urlBase}/rpc");
+        _baseUrl = $"{protocol}://{config.Host}:{config.Port}{urlBase}/rpc";
 
         if (!string.IsNullOrEmpty(config.Username) && !string.IsNullOrEmpty(config.Password))
         {
-            var credentials = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{config.Username}:{config.Password}"));
-            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", credentials);
+            _authCredentials = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{config.Username}:{config.Password}"));
         }
     }
 
@@ -388,18 +386,18 @@ public class TransmissionClient
                 arguments = arguments ?? new { }
             };
 
-            var content = new StringContent(
-                JsonSerializer.Serialize(request),
-                Encoding.UTF8,
-                "application/json"
-            );
+            var requestJson = JsonSerializer.Serialize(request);
 
-            if (!string.IsNullOrEmpty(_sessionId))
+            var requestMessage = new HttpRequestMessage(HttpMethod.Post, _baseUrl)
             {
-                content.Headers.Add("X-Transmission-Session-Id", _sessionId);
-            }
+                Content = new StringContent(requestJson, Encoding.UTF8, "application/json")
+            };
+            if (!string.IsNullOrEmpty(_sessionId))
+                requestMessage.Headers.Add("X-Transmission-Session-Id", _sessionId);
+            if (!string.IsNullOrEmpty(_authCredentials))
+                requestMessage.Headers.Authorization = new AuthenticationHeaderValue("Basic", _authCredentials);
 
-            var response = await client.PostAsync("", content);
+            var response = await client.SendAsync(requestMessage);
 
             // Handle session ID requirement (409 Conflict)
             if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
@@ -409,10 +407,16 @@ public class TransmissionClient
                     _sessionId = sessionIds.FirstOrDefault();
                     _logger.LogInformation("[Transmission] Got new session ID");
 
-                    // Retry with session ID
-                    content.Headers.Remove("X-Transmission-Session-Id");
-                    content.Headers.Add("X-Transmission-Session-Id", _sessionId);
-                    response = await client.PostAsync("", content);
+                    // Retry with new session ID (must create new request message)
+                    var retryMessage = new HttpRequestMessage(HttpMethod.Post, _baseUrl)
+                    {
+                        Content = new StringContent(requestJson, Encoding.UTF8, "application/json")
+                    };
+                    retryMessage.Headers.Add("X-Transmission-Session-Id", _sessionId);
+                    if (!string.IsNullOrEmpty(_authCredentials))
+                        retryMessage.Headers.Authorization = new AuthenticationHeaderValue("Basic", _authCredentials);
+
+                    response = await client.SendAsync(retryMessage);
                 }
             }
 

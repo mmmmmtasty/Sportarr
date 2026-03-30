@@ -134,6 +134,7 @@ public class EventPartDetector
             @"\b main [\s._-]* show \b",            // "Main Show"
             @"\b main [\s._-]* event \b",           // "Main Event"
             @"\b main [\s._-]* card \b",            // "Main Card"
+            @"\b ppv \b",                            // "PPV" (pay-per-view = the main show)
         }),
     };
 

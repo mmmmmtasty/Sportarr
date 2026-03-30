@@ -100,6 +100,24 @@ public class ImportMatchingService
         _logger.LogInformation("[Import Matching] Best match ({Confidence}%): {EventTitle} (ID: {EventId})",
             bestMatch.Score, bestMatch.Event.Title, bestMatch.Event.Id);
 
+        // Don't suggest low-confidence matches - they're almost always wrong
+        if (bestMatch.Score < 50)
+        {
+            _logger.LogInformation("[Import Matching] Best match confidence {Confidence}% is below threshold (50%) - no suggestion",
+                bestMatch.Score);
+            return new ImportSuggestion
+            {
+                Quality = quality,
+                QualityScore = qualityScore,
+                Part = detectedPart,
+                Confidence = 0,
+                ParsedSport = sportsResult.Sport,
+                ParsedOrganization = sportsResult.Organization,
+                ParsedEventDate = sportsResult.EventDate,
+                ParsedEventTitle = eventTitle
+            };
+        }
+
         return new ImportSuggestion
         {
             EventId = bestMatch.Event.Id,
@@ -266,6 +284,17 @@ public class ImportMatchingService
             }
         }
 
+        // Sport mismatch penalty: If sports parser detected a sport and event is a different sport, heavy penalty
+        if (sportsResult != null && !string.IsNullOrEmpty(sportsResult.Sport) && !string.IsNullOrEmpty(evt.Sport))
+        {
+            if (!evt.Sport.Equals(sportsResult.Sport, StringComparison.OrdinalIgnoreCase))
+            {
+                confidence -= 50;
+                _logger.LogDebug("[Import Matching] Sport mismatch penalty: parsed '{ParsedSport}' vs event '{EventSport}' for '{EventTitle}'",
+                    sportsResult.Sport, evt.Sport, evt.Title);
+            }
+        }
+
         // Sports parser bonus: If organization matches league = +15 points
         if (sportsResult != null && !string.IsNullOrEmpty(sportsResult.Organization) && evt.League != null)
         {
@@ -427,7 +456,7 @@ public class ImportMatchingService
             });
         }
 
-        return suggestions.OrderByDescending(s => s.Confidence).ToList();
+        return suggestions.Where(s => s.Confidence > 0).OrderByDescending(s => s.Confidence).ToList();
     }
 }
 

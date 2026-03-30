@@ -15,6 +15,7 @@ public class DelugeClient
     private readonly HttpClient _httpClient;
     private readonly ILogger<DelugeClient> _logger;
     private string? _cookie;
+    private string? _baseUrl;
     private HttpClient? _customHttpClient; // For SSL bypass
 
     public DelugeClient(HttpClient httpClient, ILogger<DelugeClient> logger)
@@ -38,11 +39,6 @@ public class DelugeClient
                     ServerCertificateCustomValidationCallback = (message, cert, chain, errors) => true
                 };
                 _customHttpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(100) };
-                // Copy cookie if we have one
-                if (_cookie != null)
-                {
-                    _customHttpClient.DefaultRequestHeaders.Add("Cookie", _cookie);
-                }
             }
             return _customHttpClient;
         }
@@ -64,9 +60,18 @@ public class DelugeClient
                 return false;
             }
 
-            // Test connection with daemon.info method
+            // Test with daemon.info to verify full connectivity
             var response = await SendRpcRequestAsync(config, "daemon.info", null);
-            return response != null;
+            if (response == null) return false;
+
+            // Check for RPC error ("Unknown method" means daemon is still not connected)
+            var doc = JsonDocument.Parse(response);
+            if (doc.RootElement.TryGetProperty("error", out var error) && error.ValueKind != JsonValueKind.Null)
+            {
+                _logger.LogError("[Deluge] daemon.info returned error: {Error}", error.ToString());
+                return false;
+            }
+            return true;
         }
         catch (HttpRequestException ex) when (ex.InnerException is System.Security.Authentication.AuthenticationException)
         {
@@ -137,6 +142,12 @@ public class DelugeClient
                 // No download_location - Deluge will use its configured default
                 ["add_paused"] = shouldPause
             };
+
+            if (!string.IsNullOrWhiteSpace(config.Directory))
+            {
+                options["download_location"] = config.Directory;
+                _logger.LogInformation("[Deluge] Using directory override: {Directory}", config.Directory);
+            }
 
             // Send to Deluge using core.add_torrent_file (matches Sonarr/Radarr implementation)
             _logger.LogDebug("[Deluge] Adding torrent file to Deluge");
@@ -381,34 +392,25 @@ public class DelugeClient
 
     private void ConfigureClient(DownloadClient config)
     {
-        var client = GetHttpClient(config);
         var protocol = config.UseSsl ? "https" : "http";
-
-        // Deluge Web UI defaults to root path, not /deluge
-        // Use configured URL base or default to empty (root)
-        // Users can set urlBase to:
-        //   - null or "" (empty) for default root installations (http://host:port/json)
-        //   - "/deluge" for installations with subdirectory (http://host:port/deluge/json)
         var urlBase = config.UrlBase ?? "";
 
-        // Ensure urlBase starts with / and doesn't end with / (only if not empty)
         if (!string.IsNullOrEmpty(urlBase))
         {
             if (!urlBase.StartsWith("/"))
-            {
                 urlBase = "/" + urlBase;
-            }
             urlBase = urlBase.TrimEnd('/');
         }
 
-        client.BaseAddress = new Uri($"{protocol}://{config.Host}:{config.Port}{urlBase}/json");
+        _baseUrl = $"{protocol}://{config.Host}:{config.Port}{urlBase}/json";
     }
 
     private async Task<bool> LoginAsync(DownloadClient config)
     {
         if (_cookie != null)
         {
-            return true; // Already logged in
+            // Session exists, but daemon may have disconnected
+            return await EnsureDaemonConnectedAsync(config);
         }
 
         try
@@ -424,14 +426,14 @@ public class DelugeClient
                     if (result.ValueKind == JsonValueKind.Null)
                     {
                         _logger.LogInformation("[Deluge] Already authenticated (received null result)");
-                        return true;
+                        return await EnsureDaemonConnectedAsync(config);
                     }
 
                     // Handle boolean result
                     if (result.ValueKind == JsonValueKind.True || (result.ValueKind == JsonValueKind.False && result.GetBoolean()))
                     {
                         _logger.LogInformation("[Deluge] Login successful");
-                        return true;
+                        return await EnsureDaemonConnectedAsync(config);
                     }
                 }
             }
@@ -442,6 +444,78 @@ public class DelugeClient
         catch (Exception ex)
         {
             _logger.LogError(ex, "[Deluge] Login error");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Ensure the WebUI is connected to the Deluge daemon.
+    /// The WebUI proxies core.* calls to the daemon; if the connection is lost
+    /// (common with binhex-delugevpn), all core.* methods fail with "Unknown method".
+    /// </summary>
+    private async Task<bool> EnsureDaemonConnectedAsync(DownloadClient config)
+    {
+        try
+        {
+            // Check if WebUI is connected to daemon
+            var connectedResponse = await SendRpcRequestAsync(config, "web.connected", Array.Empty<object>());
+            if (connectedResponse != null)
+            {
+                var doc = JsonDocument.Parse(connectedResponse);
+                if (doc.RootElement.TryGetProperty("result", out var result) && result.ValueKind == JsonValueKind.True)
+                {
+                    return true;
+                }
+            }
+
+            _logger.LogWarning("[Deluge] WebUI not connected to daemon, attempting reconnection...");
+
+            // Get available daemon hosts
+            var hostsResponse = await SendRpcRequestAsync(config, "web.get_hosts", Array.Empty<object>());
+            if (hostsResponse == null)
+            {
+                _logger.LogError("[Deluge] Failed to get daemon hosts");
+                return false;
+            }
+
+            var hostsDoc = JsonDocument.Parse(hostsResponse);
+            if (!hostsDoc.RootElement.TryGetProperty("result", out var hosts)
+                || hosts.ValueKind != JsonValueKind.Array
+                || hosts.GetArrayLength() == 0)
+            {
+                _logger.LogError("[Deluge] No daemon hosts available");
+                return false;
+            }
+
+            // Connect to first available host (each host is [host_id, host, port, status])
+            var firstHost = hosts[0];
+            var hostId = firstHost[0].GetString();
+
+            _logger.LogInformation("[Deluge] Connecting to daemon host: {HostId}", hostId);
+            await SendRpcRequestAsync(config, "web.connect", new object[] { hostId! });
+
+            // Brief delay for connection to establish
+            await Task.Delay(500);
+
+            // Verify connection
+            var verifyResponse = await SendRpcRequestAsync(config, "web.connected", Array.Empty<object>());
+            if (verifyResponse != null)
+            {
+                var verifyDoc = JsonDocument.Parse(verifyResponse);
+                if (verifyDoc.RootElement.TryGetProperty("result", out var verifyResult)
+                    && verifyResult.ValueKind == JsonValueKind.True)
+                {
+                    _logger.LogInformation("[Deluge] Successfully reconnected to daemon");
+                    return true;
+                }
+            }
+
+            _logger.LogError("[Deluge] Failed to verify daemon connection after reconnect");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[Deluge] Error ensuring daemon connection");
             return false;
         }
     }
@@ -460,21 +534,21 @@ public class DelugeClient
             };
 
             var requestJson = JsonSerializer.Serialize(request);
-            _logger.LogDebug("[Deluge] RPC Request: Method={Method}, URL={Url}", method, client.BaseAddress);
+            _logger.LogDebug("[Deluge] RPC Request: Method={Method}, URL={Url}", method, _baseUrl);
             _logger.LogTrace("[Deluge] RPC Request Body: {Body}", requestJson);
 
             // Note: Deluge's JSON-RPC API rejects "application/json; charset=utf-8"
             // It only accepts "application/json" without the charset suffix
-            // So we create StringContent without mediaType and set the header manually
             var content = new StringContent(requestJson, Encoding.UTF8);
             content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
 
+            var requestMessage = new HttpRequestMessage(HttpMethod.Post, _baseUrl) { Content = content };
             if (!string.IsNullOrEmpty(_cookie))
             {
-                client.DefaultRequestHeaders.Add("Cookie", _cookie);
+                requestMessage.Headers.Add("Cookie", _cookie);
             }
 
-            var response = await client.PostAsync("", content);
+            var response = await client.SendAsync(requestMessage);
             var responseBody = await response.Content.ReadAsStringAsync();
 
             _logger.LogDebug("[Deluge] RPC Response: Status={StatusCode}, Method={Method}", response.StatusCode, method);
@@ -485,12 +559,6 @@ public class DelugeClient
             {
                 _cookie = cookies.FirstOrDefault();
                 _logger.LogDebug("[Deluge] Session cookie updated");
-                // Also update custom client if it exists
-                if (_customHttpClient != null && _customHttpClient.DefaultRequestHeaders.Contains("Cookie"))
-                {
-                    _customHttpClient.DefaultRequestHeaders.Remove("Cookie");
-                    _customHttpClient.DefaultRequestHeaders.Add("Cookie", _cookie);
-                }
             }
 
             if (response.IsSuccessStatusCode)

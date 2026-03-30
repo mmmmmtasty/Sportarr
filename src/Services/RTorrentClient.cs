@@ -13,6 +13,8 @@ public class RTorrentClient
 {
     private readonly HttpClient _httpClient;
     private readonly ILogger<RTorrentClient> _logger;
+    private string? _baseUrl;
+    private string? _authCredentials;
     private HttpClient? _customHttpClient; // For SSL bypass
 
     public RTorrentClient(HttpClient httpClient, ILogger<RTorrentClient> logger)
@@ -93,7 +95,13 @@ public class RTorrentClient
                 _logger.LogInformation("[rTorrent] Adding torrent in STOPPED state (InitialState=Stopped)");
             }
 
-            var response = await SendXmlRpcRequestAsync(config, command, new object[] { "", torrentUrl });
+            var directory = config.Directory ?? "";
+            if (!string.IsNullOrWhiteSpace(config.Directory))
+            {
+                _logger.LogInformation("[rTorrent] Using directory override: {Directory}", config.Directory);
+            }
+
+            var response = await SendXmlRpcRequestAsync(config, command, new object[] { directory, torrentUrl });
 
             if (response != null)
             {
@@ -283,26 +291,18 @@ public class RTorrentClient
 
     private void ConfigureClient(DownloadClient config)
     {
-        var client = GetHttpClient(config);
         var protocol = config.UseSsl ? "https" : "http";
-
-        // rTorrent with ruTorrent web interface typically runs at /rutorrent
-        // Use configured URL base or default to "/rutorrent" for backward compatibility
         var urlBase = string.IsNullOrEmpty(config.UrlBase) ? "/rutorrent" : config.UrlBase;
 
-        // Ensure urlBase starts with / and doesn't end with /
         if (!urlBase.StartsWith("/"))
-        {
             urlBase = "/" + urlBase;
-        }
         urlBase = urlBase.TrimEnd('/');
 
-        client.BaseAddress = new Uri($"{protocol}://{config.Host}:{config.Port}{urlBase}/RPC2");
+        _baseUrl = $"{protocol}://{config.Host}:{config.Port}{urlBase}/RPC2";
 
         if (!string.IsNullOrEmpty(config.Username) && !string.IsNullOrEmpty(config.Password))
         {
-            var credentials = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{config.Username}:{config.Password}"));
-            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", credentials);
+            _authCredentials = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{config.Username}:{config.Password}"));
         }
     }
 
@@ -312,9 +312,15 @@ public class RTorrentClient
         {
             var client = GetHttpClient(config);
             var xmlRequest = BuildXmlRpcRequest(method, parameters);
-            var content = new StringContent(xmlRequest, Encoding.UTF8, "text/xml");
 
-            var response = await client.PostAsync("", content);
+            var requestMessage = new HttpRequestMessage(HttpMethod.Post, _baseUrl)
+            {
+                Content = new StringContent(xmlRequest, Encoding.UTF8, "text/xml")
+            };
+            if (!string.IsNullOrEmpty(_authCredentials))
+                requestMessage.Headers.Authorization = new AuthenticationHeaderValue("Basic", _authCredentials);
+
+            var response = await client.SendAsync(requestMessage);
 
             if (response.IsSuccessStatusCode)
             {
