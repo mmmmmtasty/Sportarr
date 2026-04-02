@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { PlusIcon, PencilIcon, TrashIcon, BellIcon, XMarkIcon, CheckCircleIcon } from '@heroicons/react/24/outline';
 import { apiGet, apiPost, apiPut, apiDelete } from '../../utils/api';
+import SettingsHeader from '../../components/SettingsHeader';
 import TagSelector from '../../components/TagSelector';
 
 interface NotificationsSettingsProps {
@@ -141,7 +142,8 @@ const notificationTemplates: NotificationTemplate[] = [
   }
 ];
 
-export default function NotificationsSettings({ showAdvanced = false }: NotificationsSettingsProps) {
+export default function NotificationsSettings(_props: NotificationsSettingsProps) {
+  void _props;
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -158,11 +160,10 @@ export default function NotificationsSettings({ showAdvanced = false }: Notifica
     try {
       const response = await apiGet('/api/notification');
       if (response.ok) {
-        const data = await response.json();
-        // Parse configJson for each notification
-        const parsedNotifications = data.map((n: any) => ({
-          ...n,
-          ...(n.configJson ? JSON.parse(n.configJson) : {})
+        const data = (await response.json()) as Array<Notification & { configJson?: string }>;
+        const parsedNotifications = data.map((notification) => ({
+          ...notification,
+          ...(notification.configJson ? JSON.parse(notification.configJson) : {})
         }));
         setNotifications(parsedNotifications);
       }
@@ -195,6 +196,7 @@ export default function NotificationsSettings({ showAdvanced = false }: Notifica
 
   const handleSelectTemplate = (template: NotificationTemplate) => {
     setSelectedTemplate(template);
+    setTestResult(null);
     setFormData({
       name: template.name,
       implementation: template.implementation,
@@ -217,7 +219,8 @@ export default function NotificationsSettings({ showAdvanced = false }: Notifica
     });
   };
 
-  const handleFormChange = (field: keyof Notification, value: any) => {
+  const handleFormChange = (field: keyof Notification, value: Notification[keyof Notification]) => {
+    setTestResult(null);
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
@@ -286,6 +289,7 @@ export default function NotificationsSettings({ showAdvanced = false }: Notifica
   const handleEditNotification = (notification: Notification) => {
     setEditingNotification(notification);
     setFormData(notification);
+    setTestResult(null);
     const template = notificationTemplates.find(t => t.implementation === notification.implementation);
     setSelectedTemplate(template || null);
     setShowAddModal(true);
@@ -332,10 +336,14 @@ export default function NotificationsSettings({ showAdvanced = false }: Notifica
       if (response.ok) {
         setTestResult({ success: true, message: data.message || 'Notification sent successfully!' });
       } else {
-        setTestResult({ success: false, message: data.message || 'Failed to send notification' });
+        const failureMessage = data.message || data.error || data.detail || 'Failed to send notification';
+        setTestResult({ success: false, message: failureMessage });
       }
-    } catch (error: any) {
-      setTestResult({ success: false, message: error.message || 'Error testing notification' });
+    } catch (error) {
+      setTestResult({
+        success: false,
+        message: error instanceof Error ? error.message : 'Error testing notification',
+      });
     } finally {
       setTesting(false);
     }
@@ -359,150 +367,170 @@ export default function NotificationsSettings({ showAdvanced = false }: Notifica
     });
   };
 
-  return (
-    <div className="max-w-6xl mx-auto">
-      <div className="mb-8">
-        <h2 className="text-3xl font-bold text-white mb-2">Connect (Notifications)</h2>
-        <p className="text-gray-400">Configure notifications and connections to other services</p>
-      </div>
-
-      {/* Info Box */}
-      <div className="mb-8 bg-blue-950/30 border border-blue-900/50 rounded-lg p-6">
-        <div className="flex items-start">
-          <BellIcon className="w-6 h-6 text-blue-400 mr-3 flex-shrink-0 mt-0.5" />
-          <div>
-            <h3 className="text-lg font-semibold text-white mb-2">About Notifications</h3>
-            <ul className="space-y-2 text-sm text-gray-300">
-              <li className="flex items-start">
-                <span className="text-red-400 mr-2">•</span>
-                <span>
-                  <strong>On Grab:</strong> Notification sent when an event is grabbed for download
-                </span>
-              </li>
-              <li className="flex items-start">
-                <span className="text-red-400 mr-2">•</span>
-                <span>
-                  <strong>On File Import:</strong> Notification sent when an event file is imported
-                </span>
-              </li>
-              <li className="flex items-start">
-                <span className="text-red-400 mr-2">•</span>
-                <span>
-                  <strong>On Upgrade:</strong> Notification sent when a better quality version is downloaded
-                </span>
-              </li>
-              <li className="flex items-start">
-                <span className="text-red-400 mr-2">•</span>
-                <span>
-                  <strong>On Health Issue:</strong> Notification sent for system health warnings/errors
-                </span>
-              </li>
-            </ul>
+  if (loading) {
+    return (
+      <div>
+        <SettingsHeader
+          title="Connect (Notifications)"
+          subtitle="Configure notifications and connections to other services"
+          showSaveButton={false}
+        />
+        <div className="px-6 pb-6">
+          <div className="py-12 text-center">
+            <p className="text-gray-500">Loading notifications...</p>
           </div>
         </div>
       </div>
+    );
+  }
 
-      {/* Notifications List */}
-      <div className="mb-8 bg-gradient-to-br from-gray-900 to-black border border-red-900/30 rounded-lg p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-xl font-semibold text-white">Your Notifications</h3>
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="flex items-center px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
-          >
-            <PlusIcon className="w-4 h-4 mr-2" />
-            Add Notification
-          </button>
+  return (
+    <div>
+      <SettingsHeader
+        title="Connect (Notifications)"
+        subtitle="Configure notifications and connections to other services"
+        showSaveButton={false}
+      />
+
+      <div className="px-4 pb-6 sm:px-6">
+
+        {/* Info Box */}
+        <div className="mb-8 rounded-lg border border-blue-900/50 bg-blue-950/30 p-6">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+            <BellIcon className="h-6 w-6 flex-shrink-0 text-blue-400 sm:mt-0.5" />
+            <div>
+              <h3 className="mb-2 text-lg font-semibold text-white">About Notifications</h3>
+              <ul className="space-y-2 text-sm text-gray-300">
+                <li className="flex items-start">
+                  <span className="mr-2 text-red-400">•</span>
+                  <span>
+                    <strong>On Grab:</strong> Notification sent when an event is grabbed for download
+                  </span>
+                </li>
+                <li className="flex items-start">
+                  <span className="mr-2 text-red-400">•</span>
+                  <span>
+                    <strong>On File Import:</strong> Notification sent when an event file is imported
+                  </span>
+                </li>
+                <li className="flex items-start">
+                  <span className="mr-2 text-red-400">•</span>
+                  <span>
+                    <strong>On Upgrade:</strong> Notification sent when a better quality version is downloaded
+                  </span>
+                </li>
+                <li className="flex items-start">
+                  <span className="mr-2 text-red-400">•</span>
+                  <span>
+                    <strong>On Health Issue:</strong> Notification sent for system health warnings/errors
+                  </span>
+                </li>
+              </ul>
+            </div>
+          </div>
         </div>
 
-        <div className="space-y-3">
-          {notifications.map((notification) => (
-            <div
-              key={notification.id}
-              className="group bg-black/30 border border-gray-800 hover:border-red-900/50 rounded-lg p-4 transition-all"
+        {/* Notifications List */}
+        <div className="mb-8 rounded-lg border border-red-900/30 bg-gradient-to-br from-gray-900 to-black p-6">
+          <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <h3 className="text-xl font-semibold text-white">Your Notifications</h3>
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="flex w-full items-center justify-center rounded-lg bg-red-600 px-4 py-2 text-white transition-colors hover:bg-red-700 sm:w-auto"
             >
-              <div className="flex items-start justify-between">
-                <div className="flex items-start space-x-4 flex-1">
+              <PlusIcon className="mr-2 h-4 w-4" />
+              Add Notification
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            {notifications.map((notification) => (
+              <div
+                key={notification.id}
+                className="group rounded-lg border border-gray-800 bg-black/30 p-4 transition-all hover:border-red-900/50"
+              >
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4 lg:flex-1">
                   {/* Status Icon */}
-                  <div className="mt-1">
-                    {notification.enabled ? (
-                      <CheckCircleIcon className="w-6 h-6 text-green-500" />
-                    ) : (
-                      <XMarkIcon className="w-6 h-6 text-gray-500" />
-                    )}
-                  </div>
+                    <div className="mt-0.5 flex-shrink-0">
+                      {notification.enabled ? (
+                        <CheckCircleIcon className="h-6 w-6 text-green-500" />
+                      ) : (
+                        <XMarkIcon className="h-6 w-6 text-gray-500" />
+                      )}
+                    </div>
 
                   {/* Notification Info */}
-                  <div className="flex-1">
-                    <div className="flex items-center space-x-3 mb-2">
-                      <h4 className="text-lg font-semibold text-white">{notification.name}</h4>
-                      <span className="px-2 py-0.5 bg-purple-900/30 text-purple-400 text-xs rounded">
-                        {notification.implementation}
-                      </span>
-                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
+                        <h4 className="break-words text-lg font-semibold text-white">{notification.name}</h4>
+                        <span className="w-fit rounded bg-purple-900/30 px-2 py-0.5 text-xs text-purple-400">
+                          {notification.implementation}
+                        </span>
+                      </div>
 
-                    <div className="flex flex-wrap gap-2 text-xs">
-                      {notification.onGrab && (
-                        <span className="px-2 py-1 bg-blue-900/30 text-blue-400 rounded">On Grab</span>
-                      )}
-                      {notification.onDownload && (
-                        <span className="px-2 py-1 bg-green-900/30 text-green-400 rounded">On File Import</span>
-                      )}
-                      {notification.onUpgrade && (
-                        <span className="px-2 py-1 bg-yellow-900/30 text-yellow-400 rounded">On Upgrade</span>
-                      )}
-                      {notification.onRename && (
-                        <span className="px-2 py-1 bg-purple-900/30 text-purple-400 rounded">On Rename</span>
-                      )}
-                      {notification.onHealthIssue && (
-                        <span className="px-2 py-1 bg-red-900/30 text-red-400 rounded">Health Issues</span>
-                      )}
-                      {notification.onApplicationUpdate && (
-                        <span className="px-2 py-1 bg-cyan-900/30 text-cyan-400 rounded">App Updates</span>
-                      )}
+                      <div className="flex flex-wrap gap-2 text-xs">
+                        {notification.onGrab && (
+                          <span className="rounded bg-blue-900/30 px-2 py-1 text-blue-400">On Grab</span>
+                        )}
+                        {notification.onDownload && (
+                          <span className="rounded bg-green-900/30 px-2 py-1 text-green-400">On File Import</span>
+                        )}
+                        {notification.onUpgrade && (
+                          <span className="rounded bg-yellow-900/30 px-2 py-1 text-yellow-400">On Upgrade</span>
+                        )}
+                        {notification.onRename && (
+                          <span className="rounded bg-purple-900/30 px-2 py-1 text-purple-400">On Rename</span>
+                        )}
+                        {notification.onHealthIssue && (
+                          <span className="rounded bg-red-900/30 px-2 py-1 text-red-400">Health Issues</span>
+                        )}
+                        {notification.onApplicationUpdate && (
+                          <span className="rounded bg-cyan-900/30 px-2 py-1 text-cyan-400">App Updates</span>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
 
                 {/* Actions */}
-                <div className="flex items-center space-x-2 ml-4">
-                  <button
-                    onClick={() => handleTestNotification(notification)}
-                    className="p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded transition-colors"
-                    title="Test"
-                  >
-                    <BellIcon className="w-5 h-5" />
-                  </button>
-                  <button
-                    onClick={() => handleEditNotification(notification)}
-                    className="p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded transition-colors"
-                    title="Edit"
-                  >
-                    <PencilIcon className="w-5 h-5" />
-                  </button>
-                  <button
-                    onClick={() => setShowDeleteConfirm(notification.id)}
-                    className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-950/30 rounded transition-colors"
-                    title="Delete"
-                  >
-                    <TrashIcon className="w-5 h-5" />
-                  </button>
+                  <div className="flex flex-wrap items-center justify-end gap-2 lg:ml-4 lg:flex-nowrap">
+                    <button
+                      onClick={() => handleTestNotification(notification)}
+                      className="rounded p-2 text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
+                      title="Test"
+                    >
+                      <BellIcon className="h-5 w-5" />
+                    </button>
+                    <button
+                      onClick={() => handleEditNotification(notification)}
+                      className="rounded p-2 text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
+                      title="Edit"
+                    >
+                      <PencilIcon className="h-5 w-5" />
+                    </button>
+                    <button
+                      onClick={() => setShowDeleteConfirm(notification.id)}
+                      className="rounded p-2 text-gray-400 transition-colors hover:bg-red-950/30 hover:text-red-400"
+                      title="Delete"
+                    >
+                      <TrashIcon className="h-5 w-5" />
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
-
-        {notifications.length === 0 && (
-          <div className="text-center py-12">
-            <BellIcon className="w-16 h-16 text-gray-700 mx-auto mb-4" />
-            <p className="text-gray-500 mb-2">No notifications configured</p>
-            <p className="text-sm text-gray-400 mb-4">
-              Add notification connections to get alerts about downloads and system events
-            </p>
+            ))}
           </div>
-        )}
-      </div>
+
+          {notifications.length === 0 && (
+            <div className="py-12 text-center">
+              <BellIcon className="mx-auto mb-4 h-16 w-16 text-gray-700" />
+              <p className="mb-2 text-gray-500">No notifications configured</p>
+              <p className="mb-4 text-sm text-gray-400">
+                Add notification connections to get alerts about downloads and system events
+              </p>
+            </div>
+          )}
+        </div>
 
       {/* Add/Edit Notification Modal */}
       {showAddModal && (
@@ -744,10 +772,31 @@ export default function NotificationsSettings({ showAdvanced = false }: Notifica
                       </div>
                     )}
 
+                    {selectedTemplate?.fields.includes('username') && (
+                      <div>
+                        <label htmlFor="notification-username" className="block text-sm font-medium text-gray-300 mb-2">
+                          {selectedTemplate.implementation === 'Email' ? 'SMTP Username' : 'Username'}
+                        </label>
+                        <input
+                          id="notification-username"
+                          type="text"
+                          value={formData.username || ''}
+                          onChange={(e) => handleFormChange('username', e.target.value)}
+                          className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-red-600"
+                          placeholder={
+                            selectedTemplate.implementation === 'Email'
+                              ? 'Optional SMTP username'
+                              : 'Optional display name'
+                          }
+                        />
+                      </div>
+                    )}
+
                     {selectedTemplate?.fields.includes('apiKey') && (
                       <div>
-                        <label className="block text-sm font-medium text-gray-300 mb-2">API Key *</label>
+                        <label htmlFor="notification-api-key" className="block text-sm font-medium text-gray-300 mb-2">API Key *</label>
                         <input
+                          id="notification-api-key"
                           type="password"
                           value={formData.apiKey || ''}
                           onChange={(e) => handleFormChange('apiKey', e.target.value)}
@@ -854,7 +903,7 @@ export default function NotificationsSettings({ showAdvanced = false }: Notifica
 
                     {/* Emergency priority requires retry and expire */}
                     {selectedTemplate?.fields.includes('retry') && formData.priority === 2 && (
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                         <div>
                           <label className="block text-sm font-medium text-gray-300 mb-2">Retry (seconds) *</label>
                           <input
@@ -883,10 +932,11 @@ export default function NotificationsSettings({ showAdvanced = false }: Notifica
                     )}
 
                     {selectedTemplate?.fields.includes('server') && (
-                      <div className="grid grid-cols-3 gap-4">
-                        <div className="col-span-2">
-                          <label className="block text-sm font-medium text-gray-300 mb-2">SMTP Server *</label>
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                        <div className="md:col-span-2">
+                          <label htmlFor="notification-smtp-server" className="block text-sm font-medium text-gray-300 mb-2">SMTP Server *</label>
                           <input
+                            id="notification-smtp-server"
                             type="text"
                             value={formData.server || ''}
                             onChange={(e) => handleFormChange('server', e.target.value)}
@@ -908,11 +958,41 @@ export default function NotificationsSettings({ showAdvanced = false }: Notifica
                       </div>
                     )}
 
-                    {selectedTemplate?.fields.includes('from') && (
-                      <div className="grid grid-cols-2 gap-4">
+                    {selectedTemplate?.fields.includes('password') && (
+                      <div>
+                        <label htmlFor="notification-password" className="block text-sm font-medium text-gray-300 mb-2">SMTP Password</label>
+                        <input
+                          id="notification-password"
+                          type="password"
+                          value={formData.password || ''}
+                          onChange={(e) => handleFormChange('password', e.target.value)}
+                          className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-red-600"
+                          placeholder="Optional SMTP password"
+                        />
+                      </div>
+                    )}
+
+                    {selectedTemplate?.fields.includes('useSsl') && (
+                      <label className="flex items-start space-x-3 cursor-pointer rounded-lg bg-black/30 p-3 hover:bg-black/50 transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={formData.useSsl ?? true}
+                          onChange={(e) => handleFormChange('useSsl', e.target.checked)}
+                          className="mt-0.5 w-4 h-4 rounded border-gray-600 bg-gray-800 text-red-600 focus:ring-red-600"
+                        />
                         <div>
-                          <label className="block text-sm font-medium text-gray-300 mb-2">From *</label>
+                          <span className="text-sm font-medium text-gray-300">Use SSL / TLS</span>
+                          <p className="text-xs text-gray-500">Enable secure SMTP connections when your mail server requires it.</p>
+                        </div>
+                      </label>
+                    )}
+
+                    {selectedTemplate?.fields.includes('from') && (
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                        <div>
+                          <label htmlFor="notification-from" className="block text-sm font-medium text-gray-300 mb-2">From *</label>
                           <input
+                            id="notification-from"
                             type="email"
                             value={formData.from || ''}
                             onChange={(e) => handleFormChange('from', e.target.value)}
@@ -922,8 +1002,9 @@ export default function NotificationsSettings({ showAdvanced = false }: Notifica
                         </div>
 
                         <div>
-                          <label className="block text-sm font-medium text-gray-300 mb-2">To *</label>
+                          <label htmlFor="notification-to" className="block text-sm font-medium text-gray-300 mb-2">To *</label>
                           <input
+                            id="notification-to"
                             type="email"
                             value={formData.to || ''}
                             onChange={(e) => handleFormChange('to', e.target.value)}
@@ -949,22 +1030,53 @@ export default function NotificationsSettings({ showAdvanced = false }: Notifica
 
                     {/* Media Server Fields (Plex, Jellyfin, Emby) */}
                     {selectedTemplate?.fields.includes('host') && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-300 mb-2">Host *</label>
-                        <input
-                          type="text"
-                          value={formData.host || ''}
-                          onChange={(e) => handleFormChange('host', e.target.value)}
-                          className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-red-600"
-                          placeholder={selectedTemplate?.implementation === 'Plex' ? 'http://localhost:32400' : 'http://localhost:8096'}
-                        />
-                        <p className="text-xs text-gray-500 mt-1">
-                          {selectedTemplate?.implementation === 'Plex'
-                            ? 'Plex server URL (usually http://localhost:32400 or your server IP)'
-                            : `${selectedTemplate?.implementation} server URL (usually http://localhost:8096)`
-                          }
+                      <>
+                        <div>
+                          <label htmlFor="notification-host" className="block text-sm font-medium text-gray-300 mb-2">Host *</label>
+                          <input
+                            id="notification-host"
+                            type="text"
+                            value={formData.host || ''}
+                            onChange={(e) => handleFormChange('host', e.target.value)}
+                            className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-red-600"
+                            placeholder={selectedTemplate?.implementation === 'Plex' ? 'http://localhost:32400' : 'http://localhost:8096'}
+                          />
+                          <p className="text-xs text-gray-500 mt-1">
+                            {selectedTemplate?.implementation === 'Plex'
+                              ? 'Plex server URL (usually http://localhost:32400 or your server IP)'
+                              : `${selectedTemplate?.implementation} server URL (usually http://localhost:8096)`
+                            }
+                          </p>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                          <div>
+                            <label htmlFor="notification-path-map-from" className="block text-sm font-medium text-gray-300 mb-2">Sportarr Path Map</label>
+                            <input
+                              id="notification-path-map-from"
+                              type="text"
+                              value={formData.pathMapFrom || ''}
+                              onChange={(e) => handleFormChange('pathMapFrom', e.target.value)}
+                              className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-red-600"
+                              placeholder="/downloads/sportarr"
+                            />
+                          </div>
+                          <div>
+                            <label htmlFor="notification-path-map-to" className="block text-sm font-medium text-gray-300 mb-2">Server Path Map</label>
+                            <input
+                              id="notification-path-map-to"
+                              type="text"
+                              value={formData.pathMapTo || ''}
+                              onChange={(e) => handleFormChange('pathMapTo', e.target.value)}
+                              className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-red-600"
+                              placeholder="/media/library"
+                            />
+                          </div>
+                        </div>
+                        <p className="text-xs text-gray-500">
+                          Only needed when Sportarr and your media server see the same files through different filesystem paths.
                         </p>
-                      </div>
+                      </>
                     )}
 
                     {selectedTemplate?.fields.includes('updateLibrary') && (
@@ -1002,7 +1114,7 @@ export default function NotificationsSettings({ showAdvanced = false }: Notifica
                   <div className="space-y-4">
                     <h4 className="text-lg font-semibold text-white">Notification Triggers</h4>
 
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <label className="flex items-center space-x-3 cursor-pointer p-3 bg-black/30 rounded-lg hover:bg-black/50 transition-colors">
                         <input
                           type="checkbox"
@@ -1165,7 +1277,7 @@ export default function NotificationsSettings({ showAdvanced = false }: Notifica
                   </div>
                 )}
 
-                <div className="mt-6 pt-6 border-t border-gray-800 flex items-center justify-end space-x-3">
+                <div className="mt-6 pt-6 border-t border-gray-800 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-end">
                   <button
                     onClick={handleCancelEdit}
                     className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-lg transition-colors"
@@ -1208,7 +1320,7 @@ export default function NotificationsSettings({ showAdvanced = false }: Notifica
             <p className="text-gray-400 mb-6">
               Are you sure you want to delete this notification connection? This action cannot be undone.
             </p>
-            <div className="flex items-center justify-end space-x-3">
+            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-end">
               <button
                 onClick={() => setShowDeleteConfirm(null)}
                 className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-lg transition-colors"
@@ -1225,6 +1337,7 @@ export default function NotificationsSettings({ showAdvanced = false }: Notifica
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }
