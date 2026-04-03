@@ -12794,9 +12794,12 @@ app.MapPost("/api/league/{leagueId:int}/automatic-search", async (
     }
 
     // Get all monitored events in this league (searches for missing files and upgrades)
+    var unairedCutoff = DateTime.UtcNow.AddHours(24);
     var events = await db.Events
         .Where(e => e.LeagueId == leagueId && e.Monitored)
         .ToListAsync();
+
+    events = events.Where(e => e.EventDate <= unairedCutoff || (e.EventDate.TimeOfDay == TimeSpan.Zero && e.EventDate.Date <= DateTime.UtcNow.Date)).ToList();
 
     if (!events.Any())
     {
@@ -12881,9 +12884,12 @@ app.MapPost("/api/leagues/{leagueId:int}/seasons/{season}/automatic-search", asy
     }
 
     // Get all monitored events in this season
+    var unairedCutoff = DateTime.UtcNow.AddHours(24);
     var events = await db.Events
         .Where(e => e.LeagueId == leagueId && e.Season == season && e.Monitored)
         .ToListAsync();
+
+    events = events.Where(e => e.EventDate <= unairedCutoff || (e.EventDate.TimeOfDay == TimeSpan.Zero && e.EventDate.Date <= DateTime.UtcNow.Date)).ToList();
 
     if (!events.Any())
     {

@@ -62,6 +62,8 @@ public class SeasonSearchService
             .OrderBy(e => e.EventDate)
             .ToListAsync();
 
+        seasonEvents = seasonEvents.Where(e => !IsEventUnaired(e.EventDate)).ToList();
+
         if (seasonEvents.Count == 0)
         {
             return new SeasonSearchResults
@@ -290,6 +292,18 @@ public class SeasonSearchService
         }
 
         return false;
+    }
+
+    private static bool IsEventUnaired(DateTime eventDate)
+    {
+        var now = DateTime.UtcNow;
+
+        if (eventDate.TimeOfDay == TimeSpan.Zero)
+        {
+            return eventDate.Date > now.Date;
+        }
+
+        return eventDate > now.AddHours(24);
     }
 }
 

@@ -144,21 +144,15 @@ public class AutomaticSearchService : IAutomaticSearchService
                 _logger.LogInformation("[{SearchType}] Processing unmonitored event (manual search): {Title}", searchType, evt.Title);
             }
 
-            // UNAIRED EVENT CHECK (Sonarr-style): Don't search for events that haven't occurred yet
-            // Automatic searches should only look for content that actually exists
-            // Allow a 24-hour grace period for timezone differences and early releases
-            // Manual searches bypass this check - user explicitly wants to search
-            if (!isManualSearch)
+            // UNAIRED EVENT CHECK (Sonarr-style): Don't search for events that haven't occurred yet.
+            // Date-only metadata often lands as midnight UTC, so compare by calendar date in that case.
+            if (IsEventUnaired(evt.EventDate))
             {
-                var unairedGracePeriod = TimeSpan.FromHours(24);
-                if (evt.EventDate > DateTime.UtcNow.Add(unairedGracePeriod))
-                {
-                    result.Success = false;
-                    result.Message = $"Event hasn't aired yet (scheduled: {evt.EventDate:yyyy-MM-dd HH:mm} UTC). Automatic search skipped.";
-                    _logger.LogInformation("[{SearchType}] Skipping unaired event: {Title} (date: {Date})",
-                        searchType, evt.Title, evt.EventDate.ToString("yyyy-MM-dd HH:mm"));
-                    return result;
-                }
+                result.Success = false;
+                result.Message = $"Event hasn't aired yet (scheduled: {evt.EventDate:yyyy-MM-dd HH:mm} UTC). Search skipped.";
+                _logger.LogInformation("[{SearchType}] Skipping unaired event: {Title} (date: {Date})",
+                    searchType, evt.Title, evt.EventDate.ToString("yyyy-MM-dd HH:mm"));
+                return result;
             }
 
             // Check for recent failed downloads - prevent immediate re-attempts
@@ -1097,6 +1091,8 @@ public class AutomaticSearchService : IAutomaticSearchService
             .Where(e => e.Monitored && e.League != null && e.League.Monitored)
             .ToListAsync();
 
+        events = events.Where(e => !IsEventUnaired(e.EventDate)).ToList();
+
         _logger.LogInformation("[Automatic Search] Found {Count} monitored events (from monitored leagues) to search", events.Count);
 
         // Build list of search targets (event + optional part)
@@ -1494,6 +1490,18 @@ public class AutomaticSearchService : IAutomaticSearchService
         }
 
         return null;
+    }
+
+    private static bool IsEventUnaired(DateTime eventDate)
+    {
+        var now = DateTime.UtcNow;
+
+        if (eventDate.TimeOfDay == TimeSpan.Zero)
+        {
+            return eventDate.Date > now.Date;
+        }
+
+        return eventDate > now.AddHours(24);
     }
 }
 
