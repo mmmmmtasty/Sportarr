@@ -62,7 +62,7 @@ public class SeasonSearchService
             .OrderBy(e => e.EventDate)
             .ToListAsync();
 
-        seasonEvents = seasonEvents.Where(e => !IsEventUnaired(e.EventDate)).ToList();
+        seasonEvents = seasonEvents.Where(e => EventSearchTimingService.CanSearch(e.EventDate)).ToList();
 
         if (seasonEvents.Count == 0)
         {
@@ -122,7 +122,8 @@ public class SeasonSearchService
                     release,
                     evt,
                     requestedPart: null,
-                    enableMultiPartEpisodes: enableMultiPart);
+                    enableMultiPartEpisodes: enableMultiPart,
+                    allowFutureEvents: false);
 
                 if (matchResult.IsMatch)
                 {
@@ -294,17 +295,6 @@ public class SeasonSearchService
         return false;
     }
 
-    private static bool IsEventUnaired(DateTime eventDate)
-    {
-        var now = DateTime.UtcNow;
-
-        if (eventDate.TimeOfDay == TimeSpan.Zero)
-        {
-            return eventDate.Date > now.Date;
-        }
-
-        return eventDate > now.AddHours(24);
-    }
 }
 
 /// <summary>

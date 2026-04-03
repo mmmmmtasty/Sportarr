@@ -301,7 +301,7 @@ public class RssSyncService : BackgroundService
                 continue;
 
             // Full validation using ReleaseMatchingService
-            var matchResult = matchingService.ValidateRelease(release, evt, null, enableMultiPartEpisodes);
+            var matchResult = matchingService.ValidateRelease(release, evt, null, enableMultiPartEpisodes, allowFutureEvents: false);
 
             if (matchResult.IsMatch && !matchResult.IsHardRejection)
             {

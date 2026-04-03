@@ -146,7 +146,7 @@ public class AutomaticSearchService : IAutomaticSearchService
 
             // UNAIRED EVENT CHECK (Sonarr-style): Don't search for events that haven't occurred yet.
             // Date-only metadata often lands as midnight UTC, so compare by calendar date in that case.
-            if (IsEventUnaired(evt.EventDate))
+            if (!EventSearchTimingService.CanSearch(evt.EventDate, allowManualSearch: isManualSearch))
             {
                 result.Success = false;
                 result.Message = $"Event hasn't aired yet (scheduled: {evt.EventDate:yyyy-MM-dd HH:mm} UTC). Search skipped.";
@@ -509,7 +509,7 @@ public class AutomaticSearchService : IAutomaticSearchService
 
             foreach (var release in approvedReleases)
             {
-                var matchResult = _releaseMatchingService.ValidateRelease(release, evt, part, config.EnableMultiPartEpisodes);
+                var matchResult = _releaseMatchingService.ValidateRelease(release, evt, part, config.EnableMultiPartEpisodes, allowFutureEvents: isManualSearch);
 
                 if (matchResult.IsHardRejection)
                 {
@@ -1091,7 +1091,7 @@ public class AutomaticSearchService : IAutomaticSearchService
             .Where(e => e.Monitored && e.League != null && e.League.Monitored)
             .ToListAsync();
 
-        events = events.Where(e => !IsEventUnaired(e.EventDate)).ToList();
+        events = events.Where(e => EventSearchTimingService.CanSearch(e.EventDate)).ToList();
 
         _logger.LogInformation("[Automatic Search] Found {Count} monitored events (from monitored leagues) to search", events.Count);
 
@@ -1492,17 +1492,6 @@ public class AutomaticSearchService : IAutomaticSearchService
         return null;
     }
 
-    private static bool IsEventUnaired(DateTime eventDate)
-    {
-        var now = DateTime.UtcNow;
-
-        if (eventDate.TimeOfDay == TimeSpan.Zero)
-        {
-            return eventDate.Date > now.Date;
-        }
-
-        return eventDate > now.AddHours(24);
-    }
 }
 
 /// <summary>

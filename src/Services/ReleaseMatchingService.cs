@@ -96,7 +96,12 @@ public class ReleaseMatchingService
     /// <param name="evt">The event to match against</param>
     /// <param name="requestedPart">Optional specific part requested (e.g., "Main Card", "Prelims")</param>
     /// <param name="enableMultiPartEpisodes">Whether multi-part episodes are enabled. When false, rejects releases with detected parts (Main Card, Prelims, etc.)</param>
-    public ReleaseMatchResult ValidateRelease(ReleaseSearchResult release, Event evt, string? requestedPart = null, bool enableMultiPartEpisodes = true)
+    public ReleaseMatchResult ValidateRelease(
+        ReleaseSearchResult release,
+        Event evt,
+        string? requestedPart = null,
+        bool enableMultiPartEpisodes = true,
+        bool allowFutureEvents = false)
     {
         var result = new ReleaseMatchResult
         {
@@ -203,7 +208,7 @@ public class ReleaseMatchingService
         // Some upstream metadata only provides a date, which arrives as midnight UTC.
         // Treat those as date-only events so we don't incorrectly reject them as "future"
         // because of a missing time component.
-        if (IsEventStillInFuture(evt.EventDate))
+        if (!EventSearchTimingService.CanSearch(evt.EventDate, allowManualSearch: allowFutureEvents))
         {
             result.Confidence = 0;
             result.IsHardRejection = true;
@@ -657,18 +662,6 @@ public class ReleaseMatchingService
     /// Date-only event metadata often arrives at midnight UTC, so those are compared by date
     /// instead of by exact time to avoid timezone-related false positives.
     /// </summary>
-    private static bool IsEventStillInFuture(DateTime eventDate)
-    {
-        var now = DateTime.UtcNow;
-
-        if (eventDate.TimeOfDay == TimeSpan.Zero)
-        {
-            return eventDate.Date > now.Date;
-        }
-
-        return eventDate > now.AddHours(24);
-    }
-
     /// <summary>
     /// Extract round number from title (e.g., "Round 22", "Round22", "Rd 22")
     /// Used for motorsport validation to ensure Round 20 release doesn't match Round 22 event
