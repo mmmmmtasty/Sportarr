@@ -12586,6 +12586,17 @@ app.MapPost("/api/event/{eventId:int}/automatic-search", async (
 
     var eventTitle = evt.Title ?? $"Event {eventId}";
 
+    if (!EventSearchTimingService.CanSearch(evt.EventDate))
+    {
+        logger.LogInformation("[AUTOMATIC SEARCH] Skipping future event {EventId} ({Title}) scheduled for {EventDate}",
+            eventId, eventTitle, evt.EventDate.ToString("yyyy-MM-dd HH:mm"));
+        return Results.Ok(new
+        {
+            success = false,
+            message = $"Event hasn't aired yet (scheduled: {evt.EventDate:yyyy-MM-dd HH:mm} UTC). Automatic search skipped."
+        });
+    }
+
     // Check if multi-part episodes are enabled and if this is a Fighting sport
     var config = await configService.GetConfigAsync();
     var isFightingSport = new[] { "Fighting", "MMA", "UFC", "Boxing", "Kickboxing", "Wrestling" }
@@ -12800,6 +12811,8 @@ app.MapPost("/api/league/{leagueId:int}/automatic-search", async (
 
     events = events.Where(e => EventSearchTimingService.CanSearch(e.EventDate)).ToList();
 
+    events = events.Where(e => EventSearchTimingService.CanSearch(e.EventDate)).ToList();
+
     if (!events.Any())
     {
         return Results.Ok(new
@@ -12886,6 +12899,8 @@ app.MapPost("/api/leagues/{leagueId:int}/seasons/{season}/automatic-search", asy
     var events = await db.Events
         .Where(e => e.LeagueId == leagueId && e.Season == season && e.Monitored)
         .ToListAsync();
+
+    events = events.Where(e => EventSearchTimingService.CanSearch(e.EventDate)).ToList();
 
     events = events.Where(e => EventSearchTimingService.CanSearch(e.EventDate)).ToList();
 
