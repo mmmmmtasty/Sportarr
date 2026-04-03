@@ -199,6 +199,20 @@ public class ReleaseMatchingService
             parseResult.EventDate?.ToString("yyyy-MM-dd") ?? "null",
             parseResult.EventYear?.ToString() ?? "null");
 
+        // Guard against matching events that have not happened yet.
+        // Some upstream metadata only provides a date, which arrives as midnight UTC.
+        // Treat those as date-only events so we don't incorrectly reject them as "future"
+        // because of a missing time component.
+        if (IsEventStillInFuture(evt.EventDate))
+        {
+            result.Confidence = 0;
+            result.IsHardRejection = true;
+            result.Rejections.Add($"Event has not aired yet: {evt.EventDate:yyyy-MM-dd HH:mm} UTC");
+            _logger.LogDebug("[Release Matching] Hard rejection: event has not aired yet for '{Release}' against '{Event}'",
+                release.Title, evt.Title);
+            return result;
+        }
+
         if (parseResult.EventDate.HasValue)
         {
             var daysDiff = Math.Abs((evt.EventDate - parseResult.EventDate.Value).TotalDays);
@@ -636,6 +650,23 @@ public class ReleaseMatchingService
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Returns true when the event is still in the future and should not be matched yet.
+    /// Date-only event metadata often arrives at midnight UTC, so those are compared by date
+    /// instead of by exact time to avoid timezone-related false positives.
+    /// </summary>
+    private static bool IsEventStillInFuture(DateTime eventDate)
+    {
+        var now = DateTime.UtcNow;
+
+        if (eventDate.TimeOfDay == TimeSpan.Zero)
+        {
+            return eventDate.Date > now.Date;
+        }
+
+        return eventDate > now.AddHours(24);
     }
 
     /// <summary>
