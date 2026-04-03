@@ -20,7 +20,7 @@ import PageHeader from '../components/PageHeader';
 import PageShell from '../components/PageShell';
 import SortableFilterableHeader from '../components/SortableFilterableHeader';
 import { useColumnVisibility } from '../hooks/useColumnVisibility';
-import { useCompactView } from '../hooks/useCompactView';
+import { useCompactView, useIsWideScreen } from '../hooks/useCompactView';
 import { applyTableSortFilter, useTableSortFilter } from '../hooks/useTableSortFilter';
 import type { DiscoveredLeague, FollowedTeam, QualityProfile, Team } from '../types';
 
@@ -83,6 +83,7 @@ const getSportIcon = (sport: string): string => {
 export default function TeamsPage() {
   const queryClient = useQueryClient();
   const compactView = useCompactView();
+  const isWideScreen = useIsWideScreen();
   const {
     sortCol,
     sortDir,
@@ -529,7 +530,185 @@ export default function TeamsPage() {
       }
     );
 
+    const leftTeams = tableData.filter((_, index) => index % 2 === 0);
+    const rightTeams = tableData.filter((_, index) => index % 2 === 1);
+
     const visibleColumnCount = TEAM_COLUMN_DEFS.filter((column) => isVisible(column.key)).length;
+
+    const renderTable = (teams: Team[], showPicker = false) => (
+      <CompactTableFrame
+        controls={
+          showPicker ? (
+            <ColumnPicker
+              columns={TEAM_COLUMN_DEFS}
+              isVisible={(column) => isVisible(column as TeamsColumnKey)}
+              onToggle={(column) => toggleCol(column as TeamsColumnKey)}
+            />
+          ) : undefined
+        }
+        className="rounded-lg border border-red-900/30 bg-gradient-to-br from-gray-900 to-black"
+      >
+        <thead>
+          <tr className="sticky top-0 border-b border-gray-700 bg-gray-950 text-left text-xs uppercase text-gray-400">
+            {isVisible('badge') && <th className="w-12 px-2 py-1.5">Badge</th>}
+            <SortableFilterableHeader
+              col="name"
+              label="Team"
+              sortCol={sortCol}
+              sortDir={sortDir}
+              onSort={handleColSort}
+              colFilters={colFilters}
+              activeFilterCol={activeFilterCol}
+              onFilterChange={onFilterChange}
+              onFilterToggle={onFilterToggle}
+            />
+            {isVisible('sport') && (
+              <SortableFilterableHeader
+                col="sport"
+                label="Sport"
+                sortCol={sortCol}
+                sortDir={sortDir}
+                onSort={handleColSort}
+                colFilters={colFilters}
+                activeFilterCol={activeFilterCol}
+                onFilterChange={onFilterChange}
+                onFilterToggle={onFilterToggle}
+                className="px-2 py-1.5"
+              />
+            )}
+            {isVisible('country') && (
+              <SortableFilterableHeader
+                col="country"
+                label="Country"
+                sortCol={sortCol}
+                sortDir={sortDir}
+                onSort={handleColSort}
+                colFilters={colFilters}
+                activeFilterCol={activeFilterCol}
+                onFilterChange={onFilterChange}
+                onFilterToggle={onFilterToggle}
+                className="px-2 py-1.5"
+              />
+            )}
+            {isVisible('status') && <th className="px-2 py-1.5">Status</th>}
+            <th className="px-2 py-1.5 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-700">
+          {teams.map((team) => {
+            const isFollowed = team.externalId ? followedTeamIds.has(team.externalId) : false;
+            const followedTeam = team.externalId ? getFollowedTeam(team.externalId) : null;
+
+            return (
+              <tr key={team.externalId || team.id} className={TABLE_ROW_HOVER}>
+                {isVisible('badge') && (
+                  <td className="px-2 py-2">
+                    <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded bg-black/50">
+                      {team.badgeUrl ? (
+                        <img
+                          src={team.badgeUrl}
+                          alt={team.name}
+                          className="max-h-full max-w-full object-contain"
+                        />
+                      ) : (
+                        <span className="text-lg opacity-50">{getSportIcon(team.sport || '')}</span>
+                      )}
+                    </div>
+                  </td>
+                )}
+                <td className="px-3 py-2 font-medium text-white">
+                  <div>
+                    <div className="text-white">{team.name}</div>
+                    {team.alternateName && (
+                      <div className="text-xs text-gray-400">{team.alternateName}</div>
+                    )}
+                  </div>
+                </td>
+                {isVisible('sport') && (
+                  <td className="px-2 py-2">
+                    <span className={BADGE_RED}>{team.sport || 'Unknown'}</span>
+                  </td>
+                )}
+                {isVisible('country') && (
+                  <td className="px-2 py-2 text-sm text-gray-400">
+                    {team.country ? (
+                      <span className="flex items-center gap-1">
+                        <GlobeAltIcon className="h-3 w-3 flex-shrink-0" />
+                        {team.country}
+                      </span>
+                    ) : (
+                      <span className="text-gray-600">-</span>
+                    )}
+                  </td>
+                )}
+                {isVisible('status') && (
+                  <td className="px-2 py-2 text-sm">
+                    {isFollowed ? (
+                      <span className={BADGE_GREEN}>Following</span>
+                    ) : (
+                      <span className="text-gray-600">-</span>
+                    )}
+                  </td>
+                )}
+                <td className="px-2 py-2 text-right">
+                  <div className="flex items-center justify-end gap-1">
+                    {isFollowed ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => toggleTeamExpansion(team)}
+                          className="rounded p-1.5 text-green-400 transition-colors hover:bg-green-900/30 hover:text-green-300"
+                          title={expandedTeamId === team.externalId ? 'Collapse' : 'Expand'}
+                        >
+                          {expandedTeamId === team.externalId ? (
+                            <ChevronUpIcon className="h-4 w-4" />
+                          ) : (
+                            <ChevronDownIcon className="h-4 w-4" />
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (followedTeam && confirm(`Unfollow ${team.name}?`)) {
+                              unfollowTeamMutation.mutate(followedTeam.id);
+                            }
+                          }}
+                          className="rounded p-1.5 text-gray-400 transition-colors hover:bg-red-900/30 hover:text-red-400"
+                          title="Unfollow"
+                        >
+                          <TrashIcon className="h-4 w-4" />
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => followTeamMutation.mutate(team)}
+                        disabled={followTeamMutation.isPending}
+                        className="rounded p-1.5 text-red-400 transition-colors hover:bg-red-900/30 hover:text-red-300 disabled:opacity-50"
+                        title="Follow"
+                      >
+                        {followTeamMutation.isPending ? (
+                          <ArrowPathIcon className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <UserGroupIcon className="h-4 w-4" />
+                        )}
+                      </button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+          {teams.length === 0 && (
+            <tr>
+              <td colSpan={visibleColumnCount} className="px-3 py-8 text-center text-gray-400">
+                No teams found
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </CompactTableFrame>
+    );
 
     return (
       <>
@@ -539,191 +718,152 @@ export default function TeamsPage() {
               {searchQuery || selectedSport !== 'all' ? 'No teams found' : 'No teams available'}
             </p>
           </div>
+        ) : isWideScreen ? (
+          <div className="grid grid-cols-2 gap-4">
+            <div>{renderTable(leftTeams, true)}</div>
+            <div>{renderTable(rightTeams, true)}</div>
+          </div>
         ) : (
-          <CompactTableFrame
-            controls={
-              <ColumnPicker
-                columns={TEAM_COLUMN_DEFS}
-                isVisible={(column) => isVisible(column as TeamsColumnKey)}
-                onToggle={(column) => toggleCol(column as TeamsColumnKey)}
-              />
-            }
-            className="rounded-lg border border-red-900/30 bg-gradient-to-br from-gray-900 to-black"
-          >
-            <thead>
-              <tr className="sticky top-0 border-b border-gray-700 bg-gray-950 text-left text-xs uppercase text-gray-400">
-                {isVisible('badge') && <th className="w-12 px-2 py-1.5">Badge</th>}
-                <SortableFilterableHeader
-                  col="name"
-                  label="Team"
-                  sortCol={sortCol}
-                  sortDir={sortDir}
-                  onSort={handleColSort}
-                  colFilters={colFilters}
-                  activeFilterCol={activeFilterCol}
-                  onFilterChange={onFilterChange}
-                  onFilterToggle={onFilterToggle}
-                />
-                {isVisible('sport') && (
-                  <SortableFilterableHeader
-                    col="sport"
-                    label="Sport"
-                    sortCol={sortCol}
-                    sortDir={sortDir}
-                    onSort={handleColSort}
-                    colFilters={colFilters}
-                    activeFilterCol={activeFilterCol}
-                    onFilterChange={onFilterChange}
-                    onFilterToggle={onFilterToggle}
-                    className="px-2 py-1.5"
-                  />
-                )}
-                {isVisible('country') && (
-                  <SortableFilterableHeader
-                    col="country"
-                    label="Country"
-                    sortCol={sortCol}
-                    sortDir={sortDir}
-                    onSort={handleColSort}
-                    colFilters={colFilters}
-                    activeFilterCol={activeFilterCol}
-                    onFilterChange={onFilterChange}
-                    onFilterToggle={onFilterToggle}
-                    className="px-2 py-1.5"
-                  />
-                )}
-                {isVisible('status') && <th className="px-2 py-1.5">Status</th>}
-                <th className="px-2 py-1.5 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-700">
-              {tableData.map((team) => {
-                const isFollowed = team.externalId ? followedTeamIds.has(team.externalId) : false;
-                const followedTeam = team.externalId ? getFollowedTeam(team.externalId) : null;
-                const isExpanded = expandedTeamId === team.externalId;
-
-                return (
-                  <tr key={team.externalId || team.id} className={TABLE_ROW_HOVER}>
-                    {isVisible('badge') && (
-                      <td className="px-2 py-2">
-                        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded bg-black/50">
-                          {team.badgeUrl ? (
-                            <img
-                              src={team.badgeUrl}
-                              alt={team.name}
-                              className="max-h-full max-w-full object-contain"
-                            />
-                          ) : (
-                            <span className="text-lg opacity-50">{getSportIcon(team.sport || '')}</span>
-                          )}
-                        </div>
-                      </td>
-                    )}
-                    <td className="px-3 py-2 font-medium text-white">
-                      <div>
-                        <div className="text-white">{team.name}</div>
-                        {team.alternateName && (
-                          <div className="text-xs text-gray-400">{team.alternateName}</div>
-                        )}
-                      </div>
-                    </td>
-                    {isVisible('sport') && (
-                      <td className="px-2 py-2">
-                        <span className={BADGE_RED}>{team.sport || 'Unknown'}</span>
-                      </td>
-                    )}
-                    {isVisible('country') && (
-                      <td className="px-2 py-2 text-sm text-gray-400">
-                        {team.country ? (
-                          <span className="flex items-center gap-1">
-                            <GlobeAltIcon className="h-3 w-3 flex-shrink-0" />
-                            {team.country}
-                          </span>
-                        ) : (
-                          <span className="text-gray-600">-</span>
-                        )}
-                      </td>
-                    )}
-                    {isVisible('status') && (
-                      <td className="px-2 py-2 text-sm">
-                        {isFollowed ? (
-                          <span className={BADGE_GREEN}>Following</span>
-                        ) : (
-                          <span className="text-gray-600">-</span>
-                        )}
-                      </td>
-                    )}
-                    <td className="px-2 py-2 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        {isFollowed ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => toggleTeamExpansion(team)}
-                              className="rounded p-1.5 text-green-400 transition-colors hover:bg-green-900/30 hover:text-green-300"
-                              title={isExpanded ? 'Collapse' : 'Expand'}
-                            >
-                              {isExpanded ? (
-                                <ChevronUpIcon className="h-4 w-4" />
-                              ) : (
-                                <ChevronDownIcon className="h-4 w-4" />
-                              )}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (followedTeam && confirm(`Unfollow ${team.name}?`)) {
-                                  unfollowTeamMutation.mutate(followedTeam.id);
-                                }
-                              }}
-                              className="rounded p-1.5 text-gray-400 transition-colors hover:bg-red-900/30 hover:text-red-400"
-                              title="Unfollow"
-                            >
-                              <TrashIcon className="h-4 w-4" />
-                            </button>
-                          </>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => followTeamMutation.mutate(team)}
-                            disabled={followTeamMutation.isPending}
-                            className="rounded p-1.5 text-red-400 transition-colors hover:bg-red-900/30 hover:text-red-300 disabled:opacity-50"
-                            title="Follow"
-                          >
-                            {followTeamMutation.isPending ? (
-                              <ArrowPathIcon className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <UserGroupIcon className="h-4 w-4" />
-                            )}
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-              {tableData.length === 0 && (
-                <tr>
-                  <td colSpan={visibleColumnCount} className="px-3 py-8 text-center text-gray-400">
-                    No teams found
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </CompactTableFrame>
+          renderTable(tableData, true)
         )}
 
-        {expandedTeam?.externalId && renderExpandedLeagues(expandedTeam.name, expandedTeam.externalId)}
+        {expandedTeam?.externalId && (
+          <div className="mt-4 rounded-lg border border-gray-800 bg-gray-950/50 p-4">
+            <h4 className="mb-3 font-medium text-white">{expandedTeam.name} - League Settings</h4>
+
+            {isDiscovering ? (
+              <div className="py-8 text-center text-gray-400">
+                <ArrowPathIcon className="mx-auto mb-2 h-8 w-8 animate-spin" />
+                Discovering leagues...
+              </div>
+            ) : discoveredLeagues.length === 0 ? (
+              <div className="py-8 text-center text-gray-400">
+                No leagues found for this team
+              </div>
+            ) : (
+              <>
+                <div className="mb-4 rounded-lg border border-gray-800 bg-gray-900/50 p-4">
+                  <h5 className="mb-3 font-medium text-white">League Settings</h5>
+                  <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+                    <div>
+                      <label className="mb-1 block text-sm text-gray-400">Monitor Events</label>
+                      <select
+                        value={monitorType}
+                        onChange={(event) => setMonitorType(event.target.value)}
+                        className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white"
+                      >
+                        {MONITOR_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm text-gray-400">Quality Profile</label>
+                      <select
+                        value={qualityProfileId}
+                        onChange={(event) => setQualityProfileId(Number(event.target.value))}
+                        className="w-full rounded border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white"
+                      >
+                        {qualityProfiles?.map((profile) => (
+                          <option key={profile.id} value={profile.id}>
+                            {profile.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex items-end">
+                      <label className="flex cursor-pointer items-center space-x-2">
+                        <input
+                          type="checkbox"
+                          checked={searchOnAdd}
+                          onChange={(event) => setSearchOnAdd(event.target.checked)}
+                          className="h-4 w-4 rounded border-gray-600 bg-gray-800 text-red-600 focus:ring-red-500"
+                        />
+                        <span className="text-sm text-gray-300">Search for missing</span>
+                      </label>
+                    </div>
+                    <div className="flex items-end">
+                      <label className="flex cursor-pointer items-center space-x-2">
+                        <input
+                          type="checkbox"
+                          checked={searchForUpgrades}
+                          onChange={(event) => setSearchForUpgrades(event.target.checked)}
+                          className="h-4 w-4 rounded border-gray-600 bg-gray-800 text-red-600 focus:ring-red-500"
+                        />
+                        <span className="text-sm text-gray-300">Search for upgrades</span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mb-3 flex items-center justify-between gap-4">
+                  <button
+                    type="button"
+                    onClick={toggleSelectAll}
+                    className="text-sm text-blue-400 hover:text-blue-300"
+                  >
+                    {selectedLeagueIds.size === discoveredLeagues.filter((league) => !league.isAdded).length
+                      ? 'Deselect All'
+                      : 'Select All'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (expandedTeam.externalId) {
+                        void handleAddLeagues(expandedTeam.externalId);
+                      }
+                    }}
+                    disabled={selectedLeagueIds.size === 0 || isAddingLeagues}
+                    className="flex items-center gap-2 rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {isAddingLeagues ? (
+                      <ArrowPathIcon className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <PlusIcon className="h-4 w-4" />
+                    )}
+                    Add Selected ({selectedLeagueIds.size})
+                  </button>
+                </div>
+
+                <div className={`space-y-1 ${SCROLLABLE_LIST}`}>
+                  {discoveredLeagues.map((league) => (
+                    <label
+                      key={league.externalId}
+                      className="flex cursor-pointer items-center space-x-2 rounded p-2 text-sm hover:bg-gray-800/50"
+                    >
+                      {!league.isAdded && (
+                        <input
+                          type="checkbox"
+                          checked={selectedLeagueIds.has(league.externalId)}
+                          onChange={() => toggleLeagueSelection(league.externalId)}
+                          className="h-4 w-4 cursor-pointer rounded border-gray-600 bg-gray-800 text-red-600 focus:ring-red-500"
+                        />
+                      )}
+                      {league.isAdded && (
+                        <CheckIcon className="h-4 w-4 flex-shrink-0 text-green-400" />
+                      )}
+                      <span className="flex-1 text-white">{league.name}</span>
+                      {league.isAdded && <span className="text-xs text-green-400">Added</span>}
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </>
     );
   };
 
   return (
     <PageShell>
-      <PageHeader
-        title="Add Team"
-        subtitle="Follow teams across multiple leagues. When you follow a team, you can add all their leagues at once."
-      />
+      <div className="mx-auto max-w-7xl">
+        <PageHeader
+          title="Add Team"
+          subtitle="Follow teams across multiple leagues. When you follow a team, you can add all their leagues at once."
+        />
 
         <div className="bg-gradient-to-r from-blue-900/30 to-purple-900/30 border border-blue-700/30 rounded-lg p-4 mb-6">
           <p className="text-sm text-gray-300">
@@ -935,6 +1075,7 @@ export default function TeamsPage() {
             )}
           </div>
         )}
+      </div>
     </PageShell>
   );
 }
