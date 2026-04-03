@@ -204,17 +204,15 @@ public class ReleaseMatchingService
             parseResult.EventDate?.ToString("yyyy-MM-dd") ?? "null",
             parseResult.EventYear?.ToString() ?? "null");
 
-        // Guard against matching events that have not happened yet.
-        // Some upstream metadata only provides a date, which arrives as midnight UTC.
-        // Treat those as date-only events so we don't incorrectly reject them as "future"
-        // because of a missing time component.
+        // Guard against matching events that are still well ahead of the upstream UTC timestamp.
+        // Manual searches intentionally bypass this check.
         if (!EventSearchTimingService.CanSearch(evt.EventDate, allowManualSearch: allowFutureEvents))
         {
             result.Confidence = 0;
             result.IsHardRejection = true;
-            result.Rejections.Add($"Event has not aired yet: {evt.EventDate:yyyy-MM-dd HH:mm} UTC");
-            _logger.LogDebug("[Release Matching] Hard rejection: event has not aired yet for '{Release}' against '{Event}'",
-                release.Title, evt.Title);
+            result.Rejections.Add($"Event is more than {EventSearchTimingService.AutomaticSearchLeadTime.TotalHours:F0} hours away: {evt.EventDate:yyyy-MM-dd HH:mm} UTC");
+            _logger.LogDebug("[Release Matching] Hard rejection: event is more than {LeadHours} hours away for '{Release}' against '{Event}'",
+                EventSearchTimingService.AutomaticSearchLeadTime.TotalHours, release.Title, evt.Title);
             return result;
         }
 
@@ -657,11 +655,6 @@ public class ReleaseMatchingService
         return null;
     }
 
-    /// <summary>
-    /// Returns true when the event is still in the future and should not be matched yet.
-    /// Date-only event metadata often arrives at midnight UTC, so those are compared by date
-    /// instead of by exact time to avoid timezone-related false positives.
-    /// </summary>
     /// <summary>
     /// Extract round number from title (e.g., "Round 22", "Round22", "Rd 22")
     /// Used for motorsport validation to ensure Round 20 release doesn't match Round 22 event

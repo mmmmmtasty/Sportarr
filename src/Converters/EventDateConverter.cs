@@ -1,12 +1,14 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Sportarr.Api.Helpers;
 
 namespace Sportarr.Api.Converters;
 
 /// <summary>
-/// Custom JSON converter for Event.EventDate that handles nullable strTimestamp from Sportarr API.
+/// Custom JSON converter for Event.EventDate that handles nullable strTimestamp from the upstream data source.
 /// For older events (pre-2020), strTimestamp may be null, so we need to handle this gracefully.
 /// The converter tries strTimestamp first, then falls back to dateEvent if strTimestamp is null.
+/// Parsed values are normalized to UTC so the app preserves the upstream contract consistently.
 /// </summary>
 public class EventDateConverter : JsonConverter<DateTime>
 {
@@ -27,8 +29,7 @@ public class EventDateConverter : JsonConverter<DateTime>
                 return DateTime.MinValue;
             }
 
-            // Try to parse the date string
-            if (DateTime.TryParse(dateString, out var date))
+            if (UtcDateTime.TryParseAsUtc(dateString, out var date))
             {
                 return date;
             }
@@ -40,6 +41,6 @@ public class EventDateConverter : JsonConverter<DateTime>
     public override void Write(Utf8JsonWriter writer, DateTime value, JsonSerializerOptions options)
     {
         // Write as ISO 8601 format
-        writer.WriteStringValue(value.ToString("O"));
+        writer.WriteStringValue(UtcDateTime.Normalize(value).ToString("O"));
     }
 }

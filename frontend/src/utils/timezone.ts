@@ -3,8 +3,8 @@
 /**
  * Normalize a date string to ensure it's treated as UTC.
  * JavaScript's Date constructor treats strings without 'Z' suffix as local time,
- * but our backend sends UTC dates without the 'Z'. This function ensures
- * consistent UTC parsing.
+ * so this preserves UTC semantics for legacy values while remaining compatible
+ * with backend responses that already include an explicit UTC offset.
  *
  * @param dateString - Date string from API (may or may not have Z suffix)
  * @returns Date object representing the UTC time

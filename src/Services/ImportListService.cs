@@ -1,6 +1,7 @@
 using System.Xml;
 using System.Xml.Linq;
 using Sportarr.Api.Data;
+using Sportarr.Api.Helpers;
 using Sportarr.Api.Models;
 using Microsoft.EntityFrameworkCore;
 
@@ -184,7 +185,7 @@ public class ImportListService
                                 item.Element("published")?.Value ??
                                 item.Element(XName.Get("published", "http://www.w3.org/2005/Atom"))?.Value ?? "";
 
-                DateTime.TryParse(pubDateStr, out var pubDate);
+                UtcDateTime.TryParseAsUtc(pubDateStr, out var pubDate);
 
                 // Try to parse event information from title and description
                 var discoveredEvent = ParseRssItem(title, description, pubDate);
@@ -244,9 +245,9 @@ public class ImportListService
                 else if (trimmed.StartsWith("DTSTART"))
                 {
                     var dateStr = trimmed.Split(':')[1].Trim();
-                    if (DateTime.TryParseExact(dateStr, "yyyyMMdd", null, System.Globalization.DateTimeStyles.None, out var date))
+                    if (UtcDateTime.TryParseExactAsUtc(dateStr, "yyyyMMdd", out var date))
                     {
-                        currentEvent.EventDate = DateTime.SpecifyKind(date, DateTimeKind.Utc);
+                        currentEvent.EventDate = date;
                     }
                 }
                 else if (trimmed.StartsWith("LOCATION:"))
@@ -373,32 +374,12 @@ public class ImportListService
             var organization = eventEl.TryGetProperty("strLeague", out var league) ? league.GetString() : "";
             var venue = eventEl.TryGetProperty("strVenue", out var ven) ? ven.GetString() : "";
 
-            // Try to get the full timestamp first (includes date and time in UTC)
-            DateTime eventDate;
-            if (eventEl.TryGetProperty("strTimestamp", out var timestampProp) &&
-                !string.IsNullOrEmpty(timestampProp.GetString()) &&
-                DateTime.TryParse(timestampProp.GetString(), null, System.Globalization.DateTimeStyles.RoundtripKind, out eventDate))
-            {
-                // strTimestamp is already in UTC format like "2025-12-26T02:00:00"
-                eventDate = DateTime.SpecifyKind(eventDate, DateTimeKind.Utc);
-            }
-            else
-            {
-                // Fall back to combining dateEvent + strTime
-                var dateStr = eventEl.TryGetProperty("dateEvent", out var dateProp) ? dateProp.GetString() : "";
-                var timeStr = eventEl.TryGetProperty("strTime", out var timeProp) ? timeProp.GetString() : "";
+            var timestamp = eventEl.TryGetProperty("strTimestamp", out var timestampProp) ? timestampProp.GetString() : null;
+            var dateStr = eventEl.TryGetProperty("dateEvent", out var dateProp) ? dateProp.GetString() : null;
+            var timeStr = eventEl.TryGetProperty("strTime", out var timeProp) ? timeProp.GetString() : null;
 
-                if (string.IsNullOrEmpty(dateStr))
-                    return null;
-
-                // Combine date and time if both are available
-                var dateTimeStr = !string.IsNullOrEmpty(timeStr) ? $"{dateStr}T{timeStr}" : dateStr;
-
-                if (!DateTime.TryParse(dateTimeStr, out eventDate))
-                    return null;
-
-                eventDate = DateTime.SpecifyKind(eventDate, DateTimeKind.Utc);
-            }
+            if (!UtcDateTime.TryParseUpstreamEventDateTime(timestamp, dateStr, timeStr, out var eventDate))
+                return null;
 
             if (string.IsNullOrEmpty(title))
                 return null;
@@ -431,20 +412,7 @@ public class ImportListService
             var dateStr = TryGetString(eventEl, "date", "eventDate", "dateEvent", "start_date") ?? "";
             var timeStr = TryGetString(eventEl, "strTime", "time", "start_time") ?? "";
 
-            DateTime eventDate;
-            if (!string.IsNullOrEmpty(timestampStr) && DateTime.TryParse(timestampStr, null, System.Globalization.DateTimeStyles.RoundtripKind, out eventDate))
-            {
-                eventDate = DateTime.SpecifyKind(eventDate, DateTimeKind.Utc);
-            }
-            else if (!string.IsNullOrEmpty(dateStr))
-            {
-                // Combine date and time if both available
-                var combinedStr = !string.IsNullOrEmpty(timeStr) ? $"{dateStr}T{timeStr}" : dateStr;
-                if (!DateTime.TryParse(combinedStr, out eventDate))
-                    return null;
-                eventDate = DateTime.SpecifyKind(eventDate, DateTimeKind.Utc);
-            }
-            else
+            if (!UtcDateTime.TryParseUpstreamEventDateTime(timestampStr, dateStr, timeStr, out var eventDate))
             {
                 return null;
             }

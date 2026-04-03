@@ -129,11 +129,10 @@ public class RssSyncService : BackgroundService
             recentReleases.Count, effectiveAgeLimit, rssAgeLimit, indexerRetention > 0 ? indexerRetention : "disabled");
 
         // STEP 2: Get all monitored events that need content
-        // Include both missing files AND files that might need quality upgrades
-        // UNAIRED EVENT FILTER (Sonarr-style): Exclude events that haven't occurred yet
-        // This prevents grabbing releases for future events (e.g., MotoGP race next month matched to F1 event)
-        // Allow a 24-hour grace period for timezone differences and early releases
-        var unairedCutoff = DateTime.UtcNow.AddHours(24);
+        // Include both missing files AND files that might need quality upgrades.
+        // Trust the upstream UTC timestamp and allow the same automatic-search lead time
+        // used elsewhere so RSS and interactive automatic search behave consistently.
+        var unairedCutoff = DateTime.UtcNow.Add(EventSearchTimingService.AutomaticSearchLeadTime);
         var monitoredEvents = await db.Events
             .Include(e => e.League)
             .Include(e => e.HomeTeam)
@@ -151,8 +150,8 @@ public class RssSyncService : BackgroundService
         var missingEvents = monitoredEvents.Where(e => !e.HasFile).ToList();
         var upgradeEvents = monitoredEvents.Where(e => e.HasFile).ToList();
 
-        _logger.LogInformation("[RSS Sync] Matching {ReleaseCount} releases against {Missing} missing + {Upgrade} upgrade candidates (excluded unaired events after {Cutoff})",
-            recentReleases.Count, missingEvents.Count, upgradeEvents.Count, unairedCutoff.ToString("yyyy-MM-dd HH:mm"));
+        _logger.LogInformation("[RSS Sync] Matching {ReleaseCount} releases against {Missing} missing + {Upgrade} upgrade candidates (excluded events more than {LeadHours} hours away after {Cutoff})",
+            recentReleases.Count, missingEvents.Count, upgradeEvents.Count, EventSearchTimingService.AutomaticSearchLeadTime.TotalHours, unairedCutoff.ToString("yyyy-MM-dd HH:mm"));
 
         int newDownloadsAdded = 0;
         int upgradesFound = 0;

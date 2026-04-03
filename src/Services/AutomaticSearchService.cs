@@ -144,14 +144,14 @@ public class AutomaticSearchService : IAutomaticSearchService
                 _logger.LogInformation("[{SearchType}] Processing unmonitored event (manual search): {Title}", searchType, evt.Title);
             }
 
-            // UNAIRED EVENT CHECK (Sonarr-style): Don't search for events that haven't occurred yet.
-            // Date-only metadata often lands as midnight UTC, so compare by calendar date in that case.
+            // UNAIRED EVENT CHECK: Trust the upstream UTC timestamp, but allow a small buffer
+            // so automatic searches can still run when the upstream time is slightly wrong.
             if (!EventSearchTimingService.CanSearch(evt.EventDate, allowManualSearch: isManualSearch))
             {
                 result.Success = false;
-                result.Message = $"Event hasn't aired yet (scheduled: {evt.EventDate:yyyy-MM-dd HH:mm} UTC). Search skipped.";
-                _logger.LogInformation("[{SearchType}] Skipping unaired event: {Title} (date: {Date})",
-                    searchType, evt.Title, evt.EventDate.ToString("yyyy-MM-dd HH:mm"));
+                result.Message = $"Event is more than {EventSearchTimingService.AutomaticSearchLeadTime.TotalHours:F0} hours away (scheduled: {evt.EventDate:yyyy-MM-dd HH:mm} UTC). Search skipped.";
+                _logger.LogInformation("[{SearchType}] Skipping event more than {LeadHours} hours away: {Title} (date: {Date})",
+                    searchType, EventSearchTimingService.AutomaticSearchLeadTime.TotalHours, evt.Title, evt.EventDate.ToString("yyyy-MM-dd HH:mm"));
                 return result;
             }
 

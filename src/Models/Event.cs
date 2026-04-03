@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using Sportarr.Api.Converters;
+using Sportarr.Api.Helpers;
 using Sportarr.Api.Services;
 
 namespace Sportarr.Api.Models;
@@ -173,18 +174,18 @@ public class Event
     public string? Round { get; set; }
 
     /// <summary>
-    /// Event date and time in UTC. Mapped from strTimestamp (preferred, includes time)
-    /// or dateEvent (fallback, date only). strTimestamp provides accurate UTC times
-    /// for proper timezone conversion in the frontend.
-    /// Uses custom converter to handle null strTimestamp values from older events.
+    /// Event date and time from the upstream data source. strTimestamp is the
+    /// authoritative UTC timestamp when present; dateEvent is only a fallback
+    /// when the upstream data source omits strTimestamp.
+    /// Uses a custom converter so upstream timestamps are normalized to UTC.
     /// </summary>
     [JsonPropertyName("strTimestamp")]
     [JsonConverter(typeof(EventDateConverter))]
     public DateTime EventDate { get; set; }
 
     /// <summary>
-    /// Fallback date field from Sportarr API API (date only, no time).
-    /// Used when strTimestamp is null (for older events pre-2020).
+    /// Fallback date field from the upstream data source (date only, no time).
+    /// Used when strTimestamp is null.
     /// Not stored in database - only used during API deserialization.
     /// </summary>
     [JsonPropertyName("dateEvent")]
@@ -442,7 +443,7 @@ public class EventResponse
             SeasonNumber = evt.SeasonNumber,
             EpisodeNumber = evt.EpisodeNumber,
             Round = evt.Round,
-            EventDate = evt.EventDate,
+            EventDate = UtcDateTime.Normalize(evt.EventDate),
             Venue = evt.Venue,
             Location = evt.Location,
             Broadcast = evt.Broadcast,
@@ -454,8 +455,8 @@ public class EventResponse
             Quality = evt.Quality,
             QualityProfileId = evt.QualityProfileId,
             Images = evt.Images,
-            Added = evt.Added,
-            LastUpdate = evt.LastUpdate,
+            Added = UtcDateTime.Normalize(evt.Added),
+            LastUpdate = UtcDateTime.Normalize(evt.LastUpdate),
             HomeScore = evt.HomeScore,
             AwayScore = evt.AwayScore,
             Status = evt.Status,
@@ -583,7 +584,7 @@ public class EventFileResponse
             ReleaseGroup = file.ReleaseGroup,
             PartName = file.PartName,
             PartNumber = file.PartNumber,
-            Added = file.Added,
+            Added = UtcDateTime.Normalize(file.Added),
             Exists = file.Exists
         };
     }

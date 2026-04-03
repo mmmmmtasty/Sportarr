@@ -3086,7 +3086,7 @@ app.MapPost("/api/events", async (CreateEventRequest request, SportarrDbContext 
         AwayTeamId = request.AwayTeamId, // Team sports and combat sports
         Season = request.Season,
         Round = request.Round,
-        EventDate = request.EventDate,
+        EventDate = UtcDateTime.Normalize(request.EventDate),
         Venue = request.Venue,
         Location = request.Location,
         Broadcast = request.Broadcast,
@@ -3108,7 +3108,7 @@ app.MapPost("/api/events", async (CreateEventRequest request, SportarrDbContext 
     if (existingEvent != null)
     {
         // Event already exists - return it with AlreadyAdded flag
-        return Results.Ok(new { Event = existingEvent, AlreadyAdded = true });
+        return Results.Ok(new { Event = EventResponse.FromEvent(existingEvent), AlreadyAdded = true });
     }
 
     db.Events.Add(evt);
@@ -3123,7 +3123,7 @@ app.MapPost("/api/events", async (CreateEventRequest request, SportarrDbContext 
 
     if (createdEvent is null) return Results.Problem("Failed to create event");
 
-    return Results.Created($"/api/events/{evt.Id}", createdEvent);
+    return Results.Created($"/api/events/{evt.Id}", EventResponse.FromEvent(createdEvent));
 });
 
 // API: Update event (universal for all sports)
@@ -3151,7 +3151,7 @@ app.MapPut("/api/events/{id:int}", async (int id, JsonElement body, SportarrDbCo
     }
 
     if (body.TryGetProperty("eventDate", out var dateValue))
-        evt.EventDate = dateValue.GetDateTime();
+        evt.EventDate = UtcDateTime.Normalize(dateValue.GetDateTime());
 
     if (body.TryGetProperty("venue", out var venueValue))
         evt.Venue = venueValue.GetString();
@@ -12588,12 +12588,12 @@ app.MapPost("/api/event/{eventId:int}/automatic-search", async (
 
     if (!EventSearchTimingService.CanSearch(evt.EventDate))
     {
-        logger.LogInformation("[AUTOMATIC SEARCH] Skipping future event {EventId} ({Title}) scheduled for {EventDate}",
-            eventId, eventTitle, evt.EventDate.ToString("yyyy-MM-dd HH:mm"));
+        logger.LogInformation("[AUTOMATIC SEARCH] Skipping event {EventId} ({Title}) because it is more than {LeadHours} hours away (scheduled for {EventDate})",
+            eventId, eventTitle, EventSearchTimingService.AutomaticSearchLeadTime.TotalHours, evt.EventDate.ToString("yyyy-MM-dd HH:mm"));
         return Results.Ok(new
         {
             success = false,
-            message = $"Event hasn't aired yet (scheduled: {evt.EventDate:yyyy-MM-dd HH:mm} UTC). Automatic search skipped."
+            message = $"Event is more than {EventSearchTimingService.AutomaticSearchLeadTime.TotalHours:F0} hours away (scheduled: {evt.EventDate:yyyy-MM-dd HH:mm} UTC). Automatic search skipped."
         });
     }
 

@@ -18,7 +18,7 @@ public class ReleaseMatchingServiceTests
     }
 
     [Fact]
-    public void ValidateRelease_ShouldRejectFutureEventEvenWhenReleaseDateMatches()
+    public void ValidateRelease_ShouldRejectEventMoreThanTwelveHoursAwayEvenWhenReleaseDateMatches()
     {
         var eventDate = DateTime.UtcNow.AddDays(2).Date.AddHours(3);
         var evt = new Event
@@ -40,14 +40,14 @@ public class ReleaseMatchingServiceTests
         var result = _service.ValidateRelease(release, evt);
 
         result.IsHardRejection.Should().BeTrue();
-        result.Rejections.Should().Contain(r => r.Contains("has not aired yet"));
+        result.Rejections.Should().Contain(r => r.Contains("more than 12 hours away"));
         result.IsMatch.Should().BeFalse();
     }
 
     [Fact]
-    public void ValidateRelease_ShouldNotRejectDateOnlyEventOnSameUtcDate()
+    public void ValidateRelease_ShouldAllowEventWithinTwelveHourBuffer()
     {
-        var eventDate = DateTime.UtcNow.Date;
+        var eventDate = DateTime.UtcNow.AddHours(11);
         var evt = new Event
         {
             Title = "UFC 300",

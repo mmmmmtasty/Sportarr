@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using Sportarr.Api.Data;
+using Sportarr.Api.Helpers;
 using Sportarr.Api.Models;
 using Microsoft.EntityFrameworkCore;
 
@@ -409,7 +410,7 @@ public class LibraryImportService
                         LeagueId = request.LeagueId,
                         League = league,
                         Season = request.Season,
-                        EventDate = request.EventDate ?? parsedInfo.AirDate ?? DateTime.UtcNow,
+                        EventDate = UtcDateTime.Normalize(request.EventDate ?? parsedInfo.AirDate ?? DateTime.UtcNow),
                         FilePath = string.Empty, // Will be set after transfer
                         HasFile = false, // Will be set after transfer
                         FileSize = sourceFileSize,

@@ -1,11 +1,33 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
+using Sportarr.Api.Helpers;
 using Sportarr.Api.Models;
 
 namespace Sportarr.Api.Data;
 
 public class SportarrDbContext : DbContext
 {
+    private static readonly HashSet<Type> UtcDateTimeExcludedEntities = new()
+    {
+        typeof(IptvSource),
+        typeof(IptvChannel),
+        typeof(ChannelLeagueMapping),
+        typeof(DvrRecording),
+        typeof(DvrQualityProfile),
+        typeof(EpgSource),
+        typeof(EpgChannel),
+        typeof(EpgProgram)
+    };
+
+    private static readonly ValueConverter<DateTime, DateTime> UtcDateTimeConverter = new(
+        v => UtcDateTime.Normalize(v),
+        v => UtcDateTime.Normalize(v));
+
+    private static readonly ValueConverter<DateTime?, DateTime?> NullableUtcDateTimeConverter = new(
+        v => UtcDateTime.Normalize(v),
+        v => UtcDateTime.Normalize(v));
+
     public SportarrDbContext(DbContextOptions<SportarrDbContext> options) : base(options)
     {
     }
@@ -1227,5 +1249,32 @@ public class SportarrDbContext : DbContext
             entity.HasIndex(ft => ft.ExternalId).IsUnique();
             entity.HasIndex(ft => ft.Sport);
         });
+
+        ApplyUtcDateTimeConversions(modelBuilder);
+    }
+
+    private static void ApplyUtcDateTimeConversions(ModelBuilder modelBuilder)
+    {
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            var clrType = entityType.ClrType;
+
+            if (clrType == null || UtcDateTimeExcludedEntities.Contains(clrType))
+            {
+                continue;
+            }
+
+            foreach (var property in entityType.GetProperties())
+            {
+                if (property.ClrType == typeof(DateTime))
+                {
+                    property.SetValueConverter(UtcDateTimeConverter);
+                }
+                else if (property.ClrType == typeof(DateTime?))
+                {
+                    property.SetValueConverter(NullableUtcDateTimeConverter);
+                }
+            }
+        }
     }
 }
