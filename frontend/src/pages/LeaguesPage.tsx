@@ -6,6 +6,8 @@ import { toast } from 'sonner';
 import apiClient from '../api/client';
 import type { League } from '../types';
 import { LeagueProgressLine } from '../components/LeagueProgressBar';
+import PageHeader from '../components/PageHeader';
+import PageShell from '../components/PageShell';
 
 // Icon mapping for sports (all Sportarr API sport types)
 const SPORT_ICONS: Record<string, string> = {
@@ -232,16 +234,11 @@ export default function LeaguesPage() {
   }
 
   return (
-    <div className="p-4 md:p-8">
-      {/* Header */}
-      <div className="mb-4 md:mb-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl md:text-3xl font-bold text-white mb-1 md:mb-2">Leagues</h1>
-            <p className="text-sm md:text-base text-gray-400">
-              Manage your monitored leagues and competitions
-            </p>
-          </div>
+    <PageShell>
+      <PageHeader
+        title="Leagues"
+        subtitle="Manage your monitored leagues and competitions"
+        actions={
           <div className="flex items-center gap-2 md:gap-3">
             {isSelectionMode ? (
               <button
@@ -268,8 +265,11 @@ export default function LeaguesPage() {
               <span className="hidden sm:inline">+ Add League</span>
             </button>
           </div>
-        </div>
-      </div>
+        }
+        className="mb-4 md:mb-6"
+        titleClassName="text-2xl md:text-3xl"
+        subtitleClassName="text-sm md:text-base"
+      />
 
       {/* Sport Filter Tabs - Only show if user has leagues */}
       {sportFilters.length > 1 && (
@@ -739,6 +739,6 @@ export default function LeaguesPage() {
           </div>
         </div>
       )}
-    </div>
+    </PageShell>
   );
 }
