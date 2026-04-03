@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeftIcon, ChevronRightIcon, TvIcon, FunnelIcon, CalendarDaysIcon, XCircleIcon } from '@heroicons/react/24/outline';
 import { CheckCircleIcon } from '@heroicons/react/24/solid';
 import { useNavigate } from 'react-router-dom';
+import PageShell, { PageErrorState, PageLoadingState } from '../components/PageShell';
 import { useEvents } from '../api/hooks';
 import type { Event } from '../types';
 import { useSettings } from '../hooks/useSettings';
-import { useTimezone } from '../hooks/useTimezone';
+import { useUISettings } from '../hooks/useUISettings';
+import { useCompactView } from '../hooks/useCompactView';
 import {
   addDays,
   addMonths,
@@ -191,14 +193,73 @@ function EventCard({
   );
 }
 
+function SpaciousAgendaEventCard({
+  event,
+  timezone,
+  onClick,
+}: {
+  event: Event;
+  timezone: string | null;
+  onClick: () => void;
+}) {
+  const sportColors = getSportColors(event.sport || 'default');
+  const isLive = isEventLive(event, timezone);
+  const timeLabel = formatTimeInTimezone(event.eventDate, timezone, {
+    weekday: 'short', month: 'short', day: 'numeric',
+    hour: 'numeric', minute: '2-digit',
+  });
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`w-full text-left rounded-lg p-4 border transition-all hover:opacity-90 ${sportColors.surface} ${isLive ? 'border-red-500 ring-2 ring-red-500/40 animate-pulse' : sportColors.border}`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-2 mb-1">
+            <span className={`${sportColors.accent} px-2 py-0.5 text-xs font-semibold text-white rounded`}>
+              {getSportDisplayLabel(event.sport)}
+            </span>
+            {isLive && (
+              <span className="px-2 py-0.5 bg-red-500 text-white text-xs font-bold rounded animate-pulse">LIVE</span>
+            )}
+            {event.hasFile && (
+              <CheckCircleIcon className="w-4 h-4 text-green-500 flex-shrink-0" />
+            )}
+            {event.broadcast && (
+              <span className="flex items-center gap-1 text-xs text-green-300">
+                <TvIcon className="w-3.5 h-3.5" />
+                {event.broadcast}
+              </span>
+            )}
+          </div>
+          <h3 className="text-lg font-semibold text-white truncate">{event.title}</h3>
+          {event.homeTeamName && event.awayTeamName && (
+            <p className="text-sm text-gray-400 mt-0.5">{event.homeTeamName} vs {event.awayTeamName}</p>
+          )}
+          {event.venue && (
+            <p className="text-sm text-gray-500 mt-0.5">{event.venue}</p>
+          )}
+        </div>
+        <span className="text-sm text-gray-400 flex-shrink-0 whitespace-nowrap">{timeLabel}</span>
+      </div>
+    </button>
+  );
+}
+
 function AgendaSection({
   date,
   events,
   timezone,
+  isToday,
+  compact,
 }: {
   date: Date;
   events: Event[];
   timezone: string | null;
+  isToday: boolean;
+  compact: boolean;
 }) {
   const navigate = useNavigate();
 
@@ -214,16 +275,21 @@ function AgendaSection({
       </div>
       <div className="space-y-2">
         {events.map(event => (
-          <EventCard
-            key={event.id}
-            event={event}
-            timezone={timezone}
-            onClick={() => {
-              if (event.leagueId) {
-                navigate(`/leagues/${event.leagueId}`);
-              }
-            }}
-          />
+          compact ? (
+            <EventCard
+              key={event.id}
+              event={event}
+              timezone={timezone}
+              onClick={() => { if (event.leagueId) navigate(`/leagues/${event.leagueId}`); }}
+            />
+          ) : (
+            <SpaciousAgendaEventCard
+              key={event.id}
+              event={event}
+              timezone={timezone}
+              onClick={() => { if (event.leagueId) navigate(`/leagues/${event.leagueId}`); }}
+            />
+          )
         ))}
       </div>
     </div>
@@ -232,7 +298,8 @@ function AgendaSection({
 
 export default function CalendarPage() {
   const { data: events, isLoading, error } = useEvents();
-  const { timezone, loading: timezoneLoading } = useTimezone();
+  const { timezone, loading: timezoneLoading } = useUISettings();
+  const compactView = useCompactView();
   const [uiSettings, , settingsLoading] = useSettings<CalendarUISettings>('uiSettings', { firstDayOfWeek: 'sunday' });
   const navigate = useNavigate();
   const dateInputRef = useRef<HTMLInputElement>(null);
@@ -365,43 +432,32 @@ export default function CalendarPage() {
     return '';
   }, [currentDate, currentView]);
 
-  const showTodayButton = useMemo(() => {
+  const isOnToday = useCallback(() => {
     if (!currentDate) return false;
     if (currentView === 'month') {
-      return currentDate.getMonth() !== today.getMonth() || currentDate.getFullYear() !== today.getFullYear();
+      return currentDate.getMonth() === today.getMonth() && currentDate.getFullYear() === today.getFullYear();
     }
 
     if (currentView === 'week') {
-      return !weekDays.some(day => isToday(day));
+      return weekDays.some(day => isToday(day));
     }
 
     const { start, end } = getAgendaRange(currentDate);
-    return today < startOfWeek(start, firstDayOfWeek) || today > endOfWeek(end, firstDayOfWeek);
+    return today >= startOfWeek(start, firstDayOfWeek) && today <= endOfWeek(end, firstDayOfWeek);
   }, [currentDate, currentView, firstDayOfWeek, isToday, today, weekDays]);
 
   if (isLoading || timezoneLoading || settingsLoading || !currentDate) {
-    return (
-      <div className="p-8">
-        <div className="flex h-64 items-center justify-center">
-          <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-red-600"></div>
-        </div>
-      </div>
-    );
+    return <PageLoadingState label="Loading calendar..." />;
   }
 
   if (error) {
     return (
-      <div className="p-8">
-        <div className="rounded border border-red-700 bg-red-900 px-4 py-3 text-red-100">
-          <p className="font-bold">Error loading events</p>
-          <p className="text-sm">{(error as Error).message}</p>
-        </div>
-      </div>
+      <PageErrorState title="Error loading events" message={(error as Error).message} />
     );
   }
 
   return (
-    <div className="p-4 md:p-8">
+    <PageShell>
       <div className="mx-auto">
         {/* Header */}
         <div className="mb-2 md:mb-3">
@@ -421,15 +477,18 @@ export default function CalendarPage() {
                 {/* Calendar Navigation */}
                 <div className={TOOLBAR_GROUP_CLASS}>
                   {/* Today Button */}
-                  {showTodayButton && (
-                    <button
-                      onClick={() => setCurrentDate(today)}
-                      className={`${TOOLBAR_BUTTON_BASE_CLASS} ${TOOLBAR_BUTTON_ACTIVE_CLASS}`}
-                      title="Go to current date"
-                    >
-                      Today
-                    </button>
-                  )}
+                  <button
+                    onClick={() => setCurrentDate(today)}
+                    className={`${TOOLBAR_BUTTON_BASE_CLASS} ${
+                      isOnToday()
+                        ? 'text-gray-400 hover:bg-gray-800 hover:text-white'
+                        : TOOLBAR_BUTTON_ACTIVE_CLASS
+                    }`}
+                    title="Go to current date"
+                    disabled={isOnToday()}
+                  >
+                    Today
+                  </button>
 
                   <button
                     onClick={() => setCurrentDate(getAdjacentDate(currentDate, currentView, -1))}
@@ -557,6 +616,8 @@ export default function CalendarPage() {
                   date={group.date}
                   events={group.events}
                   timezone={timezone}
+                  isToday={isToday(group.date)}
+                  compact={compactView}
                 />
               ))
             ) : (
@@ -659,17 +720,21 @@ export default function CalendarPage() {
 
             {/* Sport Colors */}
             <div className="flex flex-wrap items-center gap-2 text-sm text-gray-400 lg:justify-end" data-testid="calendar-sport-legend">
-              {Object.entries(SPORT_COLORS)
-                .map(([sport, colors]) => (
-                  <div key={sport} className="flex items-center gap-2">
-                    <div data-testid={`calendar-sport-legend-${sport}`} className={`h-3 w-3 rounded ${colors.accent}`}></div>
-                    <span>{sport}</span>
-                  </div>
-                ))}
+              {uniqueSports
+                .filter(sport => sport in SPORT_COLORS)
+                .map(sport => {
+                  const colors = SPORT_COLORS[sport as SportColorKey];
+                  return (
+                    <div key={sport} className="flex items-center gap-2">
+                      <div data-testid={`calendar-sport-legend-${sport}`} className={`h-3 w-3 rounded ${colors.accent}`}></div>
+                      <span>{sport}</span>
+                    </div>
+                  );
+                })}
             </div>
           </div>
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }

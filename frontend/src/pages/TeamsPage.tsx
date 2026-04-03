@@ -17,6 +17,7 @@ import apiClient from '../api/client';
 import ColumnPicker from '../components/ColumnPicker';
 import CompactTableFrame from '../components/CompactTableFrame';
 import PageHeader from '../components/PageHeader';
+import PageShell from '../components/PageShell';
 import SortableFilterableHeader from '../components/SortableFilterableHeader';
 import { useColumnVisibility } from '../hooks/useColumnVisibility';
 import { useCompactView } from '../hooks/useCompactView';
@@ -36,7 +37,6 @@ const MONITOR_OPTIONS = [
   { value: 'None', label: 'None', description: 'Do not monitor events automatically' },
 ];
 
-const PAGE_PADDING = 'p-4 md:p-8';
 const TABLE_ROW_HOVER = 'text-sm transition-colors hover:bg-gray-800/50';
 const BADGE_RED = 'whitespace-nowrap rounded bg-red-900/30 px-1.5 py-0.5 text-xs text-red-400';
 const BADGE_GREEN = 'whitespace-nowrap rounded bg-green-900/30 px-1.5 py-0.5 text-xs text-green-400';
@@ -719,12 +719,11 @@ export default function TeamsPage() {
   };
 
   return (
-    <div className={PAGE_PADDING}>
-      <div className="mx-auto max-w-7xl">
-        <PageHeader
-          title="Add Team"
-          subtitle="Follow teams across multiple leagues. When you follow a team, you can add all their leagues at once."
-        />
+    <PageShell>
+      <PageHeader
+        title="Add Team"
+        subtitle="Follow teams across multiple leagues. When you follow a team, you can add all their leagues at once."
+      />
 
         <div className="bg-gradient-to-r from-blue-900/30 to-purple-900/30 border border-blue-700/30 rounded-lg p-4 mb-6">
           <p className="text-sm text-gray-300">
@@ -936,7 +935,6 @@ export default function TeamsPage() {
             )}
           </div>
         )}
-      </div>
-    </div>
+    </PageShell>
   );
 }

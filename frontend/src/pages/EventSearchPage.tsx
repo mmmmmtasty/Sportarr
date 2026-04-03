@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { CalendarIcon, MapPinIcon, TvIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
 import AddEventModal from '../components/AddEventModal';
+import PageHeader from '../components/PageHeader';
+import PageShell from '../components/PageShell';
 import { apiGet } from '../utils/api';
 
 // Sport categories for filtering
@@ -150,13 +152,12 @@ export default function EventSearchPage() {
   }
 
   return (
-    <div className="p-8">
+    <PageShell>
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold text-white mb-2">Add Events</h1>
-          <p className="text-gray-400">Browse and add sporting events from Sportarr API</p>
-        </div>
+        <PageHeader
+          title="Add Events"
+          subtitle="Browse and add sporting events from Sportarr API"
+        />
 
       {/* Sport Filter Tabs */}
       <div className="mb-6">
@@ -367,6 +368,6 @@ export default function EventSearchPage() {
         </div>
       )}
       </div>
-    </div>
+    </PageShell>
   );
 }

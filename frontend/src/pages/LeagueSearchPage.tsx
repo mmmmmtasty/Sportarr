@@ -5,6 +5,8 @@ import { MagnifyingGlassIcon, GlobeAltIcon, TrophyIcon, CheckCircleIcon } from '
 import { toast } from 'sonner';
 import AddLeagueModal from '../components/AddLeagueModal';
 import ConfirmationModal from '../components/ConfirmationModal';
+import PageHeader from '../components/PageHeader';
+import PageShell from '../components/PageShell';
 import { apiGet, apiPost, apiPut, apiDelete } from '../utils/api';
 
 // Sport categories for filtering (all available Sportarr API sport types)
@@ -596,15 +598,11 @@ export default function LeagueSearchPage() {
   };
 
   return (
-    <div className="p-8">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold text-white mb-2">Add League</h1>
-          <p className="text-gray-400">
-            Browse and add leagues from the Sportarr database to monitor their events
-          </p>
-        </div>
+    <PageShell>
+      <PageHeader
+        title="Add League"
+        subtitle="Browse and add leagues from the Sportarr database to monitor their events"
+      />
 
         {/* Search Controls */}
         <div className="bg-gradient-to-br from-gray-900 to-black border border-red-900/30 rounded-lg p-6 mb-6">
@@ -808,7 +806,6 @@ export default function LeagueSearchPage() {
             </p>
           </div>
         )}
-      </div>
 
       {/* Add League Modal - Always render but control with isOpen for proper transition cleanup */}
       <AddLeagueModal
@@ -836,6 +833,6 @@ export default function LeagueSearchPage() {
         confirmButtonClass="bg-red-600 hover:bg-red-700"
         isLoading={deleteLeagueMutation.isPending}
       />
-    </div>
+    </PageShell>
   );
 }
