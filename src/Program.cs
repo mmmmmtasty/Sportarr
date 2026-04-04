@@ -79,11 +79,32 @@ if (showHelp)
 var preBuilder = WebApplication.CreateBuilder(args);
 
 // Configuration - get data path first so logs go in the right place
-// Priority: 1) -data argument, 2) Environment variable, 3) Default ./data
+// Priority: 1) -data argument, 2) Environment variable, 3) Platform default
+//   - Windows: %ProgramData%\Sportarr (unless ./data already exists for backwards compat)
+//   - Other:   ./data relative to the current working directory
+// Rationale: on Windows, when the app is installed to C:\Program Files\Sportarr and
+// launched from a startup shortcut, the CWD is the install dir. Writing to
+// C:\Program Files\...\data fails with SQLite "readonly database" unless the
+// process is elevated. %ProgramData% is always writable and matches Sonarr/Radarr.
 var apiKey = preBuilder.Configuration["Sportarr:ApiKey"] ?? Guid.NewGuid().ToString("N");
-var dataPath = dataArgPath
-    ?? preBuilder.Configuration["Sportarr:DataPath"]
-    ?? Path.Combine(Directory.GetCurrentDirectory(), "data");
+var dataPath = dataArgPath ?? preBuilder.Configuration["Sportarr:DataPath"];
+if (string.IsNullOrEmpty(dataPath))
+{
+    var cwdData = Path.Combine(Directory.GetCurrentDirectory(), "data");
+    if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows)
+        && !Directory.Exists(cwdData))
+    {
+        // Default to %ProgramData%\Sportarr on Windows for fresh installs
+        dataPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "Sportarr");
+    }
+    else
+    {
+        // Non-Windows, or Windows with an existing ./data folder (backwards compat)
+        dataPath = cwdData;
+    }
+}
 
 try
 {
