@@ -79,43 +79,139 @@ if (showHelp)
 var preBuilder = WebApplication.CreateBuilder(args);
 
 // Configuration - get data path first so logs go in the right place
-// Priority: 1) -data argument, 2) Environment variable, 3) Platform default
-//   - Windows: %ProgramData%\Sportarr (unless ./data already exists for backwards compat)
-//   - Other:   ./data relative to the current working directory
-// Rationale: on Windows, when the app is installed to C:\Program Files\Sportarr and
-// launched from a startup shortcut, the CWD is the install dir. Writing to
-// C:\Program Files\...\data fails with SQLite "readonly database" unless the
-// process is elevated. %ProgramData% is always writable and matches Sonarr/Radarr.
+// Priority: 1) -data argument, 2) Sportarr__DataPath env var, 3) Platform default
+//
+// Windows:
+//   If the current working directory is inside a protected location (Program Files,
+//   Program Files (x86), or the Windows directory), unconditionally use
+//   %ProgramData%\Sportarr. Windows does not auto-elevate items launched from the
+//   Startup folder, so the app cannot rely on admin rights and must not write to
+//   protected directories. Any residual ./data folder in such a location is
+//   migrated to %ProgramData%\Sportarr on first run so existing users do not lose
+//   data. For non-protected install locations, keep using ./data if it exists
+//   (backwards compat), otherwise default to %ProgramData%\Sportarr.
+//
+// Non-Windows:
+//   ./data relative to the current working directory (unchanged).
 var apiKey = preBuilder.Configuration["Sportarr:ApiKey"] ?? Guid.NewGuid().ToString("N");
 var dataPath = dataArgPath ?? preBuilder.Configuration["Sportarr:DataPath"];
 if (string.IsNullOrEmpty(dataPath))
 {
-    var cwdData = Path.Combine(Directory.GetCurrentDirectory(), "data");
-    if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows)
-        && !Directory.Exists(cwdData))
+    var cwd = Directory.GetCurrentDirectory();
+    var cwdData = Path.Combine(cwd, "data");
+    var isWindows = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
+        System.Runtime.InteropServices.OSPlatform.Windows);
+
+    if (isWindows)
     {
-        // Default to %ProgramData%\Sportarr on Windows for fresh installs
-        dataPath = Path.Combine(
+        var programData = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "Sportarr");
+
+        // Is the CWD under a Windows protected directory?
+        var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        var programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+        var windowsDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+
+        bool CwdStartsWith(string prefix) =>
+            !string.IsNullOrEmpty(prefix) &&
+            cwd.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+
+        var cwdIsProtected = CwdStartsWith(programFiles)
+            || CwdStartsWith(programFilesX86)
+            || CwdStartsWith(windowsDir);
+
+        if (cwdIsProtected)
+        {
+            // Always use ProgramData, ignore any residual ./data in Program Files
+            dataPath = programData;
+
+            // One-time migration: if ProgramData is empty but the old ./data in the
+            // protected location exists and has files, copy them over so users don't
+            // lose settings/database from partially-working installs.
+            try
+            {
+                var programDataIsEmpty = !Directory.Exists(programData)
+                    || (Directory.GetFiles(programData).Length == 0
+                        && Directory.GetDirectories(programData).Length == 0);
+
+                if (programDataIsEmpty && Directory.Exists(cwdData))
+                {
+                    Directory.CreateDirectory(programData);
+                    var filesCopied = 0;
+                    foreach (var srcFile in Directory.EnumerateFiles(cwdData, "*", SearchOption.AllDirectories))
+                    {
+                        var relative = Path.GetRelativePath(cwdData, srcFile);
+                        var dstFile = Path.Combine(programData, relative);
+                        Directory.CreateDirectory(Path.GetDirectoryName(dstFile)!);
+                        try
+                        {
+                            File.Copy(srcFile, dstFile, overwrite: false);
+                            filesCopied++;
+                        }
+                        catch (Exception copyEx)
+                        {
+                            Console.WriteLine($"[Sportarr] Warning: failed to migrate {relative}: {copyEx.Message}");
+                        }
+                    }
+
+                    if (filesCopied > 0)
+                    {
+                        Console.WriteLine($"[Sportarr] Migrated {filesCopied} file(s) from {cwdData} to {programData}");
+                    }
+                }
+            }
+            catch (Exception migEx)
+            {
+                Console.WriteLine($"[Sportarr] Warning: data migration check failed: {migEx.Message}");
+            }
+        }
+        else
+        {
+            // Non-protected install location: prefer existing ./data (backwards compat)
+            dataPath = Directory.Exists(cwdData) ? cwdData : programData;
+        }
     }
     else
     {
-        // Non-Windows, or Windows with an existing ./data folder (backwards compat)
         dataPath = cwdData;
     }
 }
 
+// Defense in depth: verify the chosen directory is actually writable. If it is not,
+// fall back to %ProgramData%\Sportarr on Windows (caught edge cases: read-only mounts,
+// locked folders, ACL quirks). On other platforms, propagate the error with a clear
+// hint so the user can use -data to specify a writable path.
 try
 {
     Directory.CreateDirectory(dataPath);
-    Console.WriteLine($"[Sportarr] Data directory: {dataPath}");
+    var probePath = Path.Combine(dataPath, ".sportarr-write-test");
+    File.WriteAllText(probePath, "ok");
+    File.Delete(probePath);
 }
-catch (Exception ex)
+catch (Exception writeEx)
 {
-    Console.WriteLine($"[Sportarr] ERROR: Failed to create data directory: {ex.Message}");
-    throw;
+    var isWindowsFallback = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
+        System.Runtime.InteropServices.OSPlatform.Windows);
+    if (isWindowsFallback)
+    {
+        var fallback = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "Sportarr");
+        Console.WriteLine($"[Sportarr] WARNING: data directory {dataPath} is not writable ({writeEx.Message}). Falling back to {fallback}");
+        dataPath = fallback;
+    }
+    else
+    {
+        Console.WriteLine($"[Sportarr] ERROR: data directory {dataPath} is not writable: {writeEx.Message}");
+        Console.WriteLine("[Sportarr] Use -data <path> or set Sportarr__DataPath to a writable directory.");
+        throw;
+    }
 }
+
+// Ensure the (possibly fallback) dataPath exists and log the final choice
+Directory.CreateDirectory(dataPath);
+Console.WriteLine($"[Sportarr] Data directory: {dataPath}");
 
 // Configure Serilog with logs inside the data directory (like Sonarr)
 // This ensures logs are accessible in Docker when user maps their config volume
@@ -9532,6 +9628,7 @@ app.MapPost("/api/event/{eventId:int}/search", async (
 
     var allResults = new List<ReleaseSearchResult>();
     var seenGuids = new HashSet<string>();
+    var skippedIndexers = new List<Sportarr.Api.Services.SkippedIndexer>();
 
     // UNIVERSAL: Build search queries using sport-agnostic approach
     // If custom query is provided, use that instead of auto-generated queries
@@ -9602,7 +9699,7 @@ app.MapPost("/api/event/{eventId:int}/search", async (
             // Pass enableMultiPartEpisodes to ensure proper part filtering
             // When disabled for fighting sports, this rejects releases with detected parts (Main Card, Prelims, etc.)
             // Pass event title for Fight Night detection (base name = Main Card for Fight Nights)
-            var results = await indexerSearchService.SearchAllIndexersAsync(query, 10000, qualityProfileId, part, evt.Sport, config.EnableMultiPartEpisodes, evt.Title, evt.League?.Tags);
+            var results = await indexerSearchService.SearchAllIndexersAsync(query, 10000, qualityProfileId, part, evt.Sport, config.EnableMultiPartEpisodes, evt.Title, evt.League?.Tags, skippedIndexers);
 
             // Add results with GUID deduplication (fallback queries may overlap with primary)
             foreach (var result in results)
@@ -9837,7 +9934,18 @@ app.MapPost("/api/event/{eventId:int}/search", async (
 
     logger.LogInformation("[SEARCH] Search completed. Returning {Count} results ({NonMatching} non-matching, {Blocked} blocklisted)",
         sortedResults.Count, nonMatchingCount, sortedResults.Count(r => r.IsBlocklisted));
-    return Results.Ok(sortedResults);
+
+    // Dedupe skipped entries by IndexerId (fallback queries re-hit the same indexers)
+    var dedupedSkipped = skippedIndexers
+        .GroupBy(s => s.IndexerId)
+        .Select(g => g.First())
+        .ToList();
+
+    return Results.Ok(new
+    {
+        results = sortedResults,
+        skipped = dedupedSkipped
+    });
 });
 
 // API: Pack search for event - searches for week/round pack releases (e.g., NFL-2025-Week15)
@@ -9891,11 +9999,12 @@ app.MapPost("/api/event/{eventId:int}/search-pack", async (
 
     var allResults = new List<ReleaseSearchResult>();
     var seenGuids = new HashSet<string>();
+    var skippedIndexers = new List<Sportarr.Api.Services.SkippedIndexer>();
 
     foreach (var query in queries)
     {
         logger.LogInformation("[PACK SEARCH] Searching: '{Query}'", query);
-        var results = await indexerSearchService.SearchAllIndexersAsync(query, 10000, qualityProfile?.Id, null, evt.Sport, true, null, evt.League?.Tags);
+        var results = await indexerSearchService.SearchAllIndexersAsync(query, 10000, qualityProfile?.Id, null, evt.Sport, true, null, evt.League?.Tags, skippedIndexers);
 
         foreach (var result in results)
         {
@@ -9918,7 +10027,18 @@ app.MapPost("/api/event/{eventId:int}/search-pack", async (
         .ToList();
 
     logger.LogInformation("[PACK SEARCH] Pack search completed. Returning {Count} results", sortedResults.Count);
-    return Results.Ok(sortedResults);
+
+    // Dedupe skipped entries by IndexerId (fallback queries re-hit the same indexers)
+    var dedupedSkipped = skippedIndexers
+        .GroupBy(s => s.IndexerId)
+        .Select(g => g.First())
+        .ToList();
+
+    return Results.Ok(new
+    {
+        results = sortedResults,
+        skipped = dedupedSkipped
+    });
 });
 
 // API: Get leagues (universal for all sports)
