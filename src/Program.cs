@@ -158,7 +158,15 @@ if (string.IsNullOrEmpty(dataPath))
                     if (filesCopied > 0)
                     {
                         Console.WriteLine($"[Sportarr] Migrated {filesCopied} file(s) from {cwdData} to {programData}");
+                        Console.WriteLine($"[Sportarr] NOTE: The old data folder at {cwdData} is no longer used and can be deleted manually.");
                     }
+                }
+                else if (Directory.Exists(cwdData))
+                {
+                    // ProgramData already has data but a stale folder still exists in the
+                    // protected location. Tell the user they can clean it up so they do not
+                    // wonder which copy is authoritative.
+                    Console.WriteLine($"[Sportarr] NOTE: A stale data folder exists at {cwdData} (Sportarr now uses {programData}). You can delete it manually.");
                 }
             }
             catch (Exception migEx)
@@ -311,6 +319,14 @@ builder.WebHost.UseUrls($"http://{bindAddress}:{port}");
 builder.Host.UseSerilog();
 
 builder.Configuration["Sportarr:ApiKey"] = apiKey;
+// Propagate the resolved data path into the DI configuration so that services
+// like ConfigService (which loads/saves config.xml) use the same directory as
+// the database and logs. Without this, ConfigService falls back to a
+// CWD-relative "./data" path, which on Windows ends up in C:\WINDOWS\system32
+// or C:\Program Files depending on how the process was launched — causing a
+// split-brain where sportarr.db lives in %ProgramData%\Sportarr but config.xml
+// is read/written somewhere else.
+builder.Configuration["Sportarr:DataPath"] = dataPath;
 
 // Add services
 builder.Services.AddEndpointsApiExplorer();
@@ -15872,7 +15888,12 @@ try
 
         using var trayIcon = new WindowsTrayIcon(1867, appShutdown);
 
-        // Run web host in background, tray icon on UI thread
+        // Run web host in background, tray icon on UI thread.
+        // If the host fails to start (e.g. port already in use), capture the
+        // exception, trigger app shutdown so the tray loop exits, and rethrow
+        // it to the outer catch so the user sees a clean error instead of a
+        // zombie tray icon with no web UI behind it.
+        Exception? webHostFailure = null;
         var webHostTask = Task.Run(async () =>
         {
             try
@@ -15882,6 +15903,11 @@ try
             catch (OperationCanceledException)
             {
                 // Expected when shutting down
+            }
+            catch (Exception ex)
+            {
+                webHostFailure = ex;
+                appShutdown.Cancel();
             }
         });
 
@@ -15897,6 +15923,13 @@ try
 
         // Wait for web host to finish
         webHostTask.Wait(TimeSpan.FromSeconds(5));
+
+        // If the web host died on startup, rethrow so the outer catch can
+        // translate it into a user-friendly error (e.g. port in use).
+        if (webHostFailure != null)
+        {
+            throw webHostFailure;
+        }
     }
     else
     {
@@ -15908,6 +15941,22 @@ try
     app.Run();
 #endif
 }
+// Detect the common "port already in use" crash and surface a user-friendly
+// message instead of a wall of stack traces. This usually means another
+// Sportarr instance is already running — e.g. the user has Sportarr set to
+// launch from both a Task Scheduler entry and a Startup shortcut, and the
+// second instance loses the race for the port.
+catch (Exception ex) when (IsAddressInUseException(ex))
+{
+    var friendly =
+        $"Port {port} is already in use. Another Sportarr instance is probably already running. " +
+        $"Check the system tray, or Task Manager for Sportarr.exe, or any services/scheduled tasks " +
+        $"that may auto-start Sportarr. You can also change the port in config.xml.";
+    Console.WriteLine($"[Sportarr] ERROR: {friendly}");
+    Log.Fatal("[Sportarr] {Message}", friendly);
+    Log.CloseAndFlush();
+    Environment.Exit(1);
+}
 catch (Exception ex)
 {
     Log.Fatal(ex, "[Sportarr] Application terminated unexpectedly");
@@ -15917,6 +15966,22 @@ finally
 {
     Log.Information("[Sportarr] Shutting down...");
     Log.CloseAndFlush();
+}
+
+// Walks the exception chain looking for the SocketException with
+// AddressAlreadyInUse, regardless of how deeply Kestrel's host pipeline wraps it.
+static bool IsAddressInUseException(Exception? ex)
+{
+    while (ex != null)
+    {
+        if (ex is System.Net.Sockets.SocketException sx &&
+            sx.SocketErrorCode == System.Net.Sockets.SocketError.AddressAlreadyInUse)
+        {
+            return true;
+        }
+        ex = ex.InnerException;
+    }
+    return false;
 }
 
 // Helper function: Check if a tennis league is individual-based (ATP, WTA) vs team-based (Fed Cup, Davis Cup, Olympics)
