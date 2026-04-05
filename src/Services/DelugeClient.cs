@@ -424,6 +424,15 @@ public class DelugeClient
             timeRemaining = TimeSpan.FromSeconds(torrent.Eta);
         }
 
+        // Pick the effective base path (handles Deluge 2.x download_location vs
+        // save_path, and warns on invalid Label plugin misconfigurations), then
+        // append the torrent name so callers get the full file/folder path for
+        // import rather than just the parent download directory.
+        var basePath = GetEffectiveSavePath(torrent);
+        var computedSavePath = !string.IsNullOrEmpty(torrent.Name)
+            ? Path.Combine(basePath, torrent.Name)
+            : basePath;
+
         return new DownloadClientStatus
         {
             Status = status,
@@ -431,7 +440,7 @@ public class DelugeClient
             Downloaded = torrent.TotalDone,
             Size = torrent.TotalSize,
             TimeRemaining = timeRemaining,
-            SavePath = GetEffectiveSavePath(torrent),
+            SavePath = computedSavePath,
             ErrorMessage = status == "failed" ? $"Torrent in error state: {torrent.State}" : null,
             Ratio = torrent.Ratio
         };
