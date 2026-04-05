@@ -13,7 +13,7 @@ import LeagueFilesModal from '../components/LeagueFilesModal';
 import EventStatusBadge from '../components/EventStatusBadge';
 import ManualImportModal from '../components/ManualImportModal';
 import { useSearchQueueStatus, useDownloadQueue } from '../api/hooks';
-import { useTimezone } from '../hooks/useTimezone';
+import { useUISettings } from '../hooks/useUISettings';
 import TagSelector from '../components/TagSelector';
 import { formatDateInTimezone } from '../utils/timezone';
 
@@ -199,7 +199,7 @@ export default function LeagueDetailPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
-  const { timezone, eventViewMode } = useTimezone();
+  const { timezone, eventViewMode } = useUISettings();
   const [isWideScreen, setIsWideScreen] = useState(() => window.innerWidth >= 1280);
 
   useEffect(() => {
