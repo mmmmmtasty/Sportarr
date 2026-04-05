@@ -32,7 +32,7 @@ import { apiGet } from '../../utils/api';
 import type { QualityProfile } from '../../types';
 import PageHeader from '../../components/PageHeader';
 import PageShell from '../../components/PageShell';
-import { useTimezone } from '../../hooks/useTimezone';
+import { useUISettings } from '../../hooks/useUISettings';
 import { formatDateInTimezone, formatTimeInTimezone } from '../../utils/timezone';
 
 // Naming preset types (same as MediaManagementSettings)
@@ -242,7 +242,7 @@ const defaultFormData: ScheduleFormData = {
 
 export default function DvrRecordingsSettings() {
   // Get user's configured timezone
-  const { timezone } = useTimezone();
+  const { timezone } = useUISettings();
 
   // State
   const [recordings, setRecordings] = useState<DvrRecording[]>([]);
@@ -976,7 +976,7 @@ export default function DvrRecordingsSettings() {
                   <div className="space-y-6">
                     {/* GB Per Hour Slider */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
+                      <label className="text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
                         <FolderIcon className="w-4 h-4 text-yellow-400" />
                         File Size: {gbPerHour.toFixed(1)} GB per hour
                       </label>
@@ -1000,7 +1000,7 @@ export default function DvrRecordingsSettings() {
 
                     {/* Video Codec */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
+                      <label className="text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
                         <VideoCameraIcon className="w-4 h-4 text-purple-400" />
                         Video Codec
                       </label>
@@ -1042,7 +1042,7 @@ export default function DvrRecordingsSettings() {
 
                     {/* Audio Settings */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-3 flex items-center gap-2">
+                      <label className="text-sm font-medium text-gray-300 mb-3 flex items-center gap-2">
                         <SpeakerWaveIcon className="w-4 h-4 text-green-400" />
                         Audio Settings
                       </label>
