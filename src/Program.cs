@@ -13240,6 +13240,114 @@ app.MapPost("/api/leagues/{leagueId:int}/seasons/{season}/search", async (
 });
 
 // ========================================
+// iCAL FEED - Calendar subscription for external apps
+// ========================================
+
+// iCal feed endpoint: subscribe from Google Calendar, Apple Calendar, Outlook, etc.
+// Auth via ?apikey= query parameter (calendar apps can't send custom headers).
+app.MapGet("/api/calendar.ics", async (
+    int? pastDays,
+    int? futureDays,
+    bool? unmonitored,
+    int? leagueId,
+    bool? asAllDay,
+    SportarrDbContext db,
+    ILogger<Program> logger) =>
+{
+    var past = pastDays ?? 7;
+    var future = futureDays ?? 28;
+    var includeUnmonitored = unmonitored ?? false;
+    var allDay = asAllDay ?? false;
+
+    var startDate = DateTime.UtcNow.AddDays(-past);
+    var endDate = DateTime.UtcNow.AddDays(future);
+
+    logger.LogInformation("[ICAL FEED] Generating calendar feed (past={Past}d, future={Future}d, unmonitored={Unmonitored}, leagueId={LeagueId}, allDay={AllDay})",
+        past, future, includeUnmonitored, leagueId?.ToString() ?? "all", allDay);
+
+    var query = db.Events
+        .Include(e => e.League)
+        .Include(e => e.HomeTeam)
+        .Include(e => e.AwayTeam)
+        .Include(e => e.Files)
+        .Where(e => e.EventDate >= startDate && e.EventDate <= endDate);
+
+    if (!includeUnmonitored)
+        query = query.Where(e => e.Monitored);
+
+    if (leagueId.HasValue)
+        query = query.Where(e => e.LeagueId == leagueId.Value);
+
+    var events = await query.OrderBy(e => e.EventDate).ToListAsync();
+
+    logger.LogInformation("[ICAL FEED] Found {Count} events for calendar feed", events.Count);
+
+    // Build iCal using Ical.Net (same library Sonarr uses)
+    var calendar = new Ical.Net.Calendar();
+    calendar.ProductId = "-//sportarr.net//Sportarr//EN";
+    calendar.AddProperty("X-WR-CALNAME", "Sportarr Sports Schedule");
+    calendar.AddProperty("NAME", "Sportarr Sports Schedule");
+
+    foreach (var evt in events)
+    {
+        var calEvent = new Ical.Net.CalendarComponents.CalendarEvent();
+
+        // UID: stable unique identifier per event
+        calEvent.Uid = $"Sportarr_event_{evt.Id}";
+
+        // Summary: "HomeTeam vs AwayTeam" or event title
+        var summary = !string.IsNullOrEmpty(evt.HomeTeamName) && !string.IsNullOrEmpty(evt.AwayTeamName)
+            ? $"{evt.HomeTeamName} vs {evt.AwayTeamName}"
+            : evt.Title;
+        calEvent.Summary = summary;
+
+        // Description: league, sport, venue, broadcast, status
+        var descParts = new List<string>();
+        if (evt.League != null) descParts.Add($"League: {evt.League.Name}");
+        if (!string.IsNullOrEmpty(evt.Sport)) descParts.Add($"Sport: {evt.Sport}");
+        if (!string.IsNullOrEmpty(evt.Venue)) descParts.Add($"Venue: {evt.Venue}");
+        if (!string.IsNullOrEmpty(evt.Broadcast)) descParts.Add($"Broadcast: {evt.Broadcast}");
+        if (!string.IsNullOrEmpty(evt.Status)) descParts.Add($"Status: {evt.Status}");
+        calEvent.Description = string.Join("\n", descParts);
+
+        // Location
+        if (!string.IsNullOrEmpty(evt.Venue))
+            calEvent.Location = !string.IsNullOrEmpty(evt.Location)
+                ? $"{evt.Venue}, {evt.Location}"
+                : evt.Venue;
+
+        // Categories: Sport name
+        if (!string.IsNullOrEmpty(evt.Sport))
+            calEvent.Categories = new List<string> { evt.Sport };
+
+        // Date/Time
+        if (allDay)
+        {
+            calEvent.IsAllDay = true;
+            calEvent.DtStart = new Ical.Net.DataTypes.CalDateTime(evt.EventDate.Date);
+            calEvent.DtEnd = new Ical.Net.DataTypes.CalDateTime(evt.EventDate.Date.AddDays(1));
+        }
+        else
+        {
+            calEvent.DtStart = new Ical.Net.DataTypes.CalDateTime(evt.EventDate, "UTC");
+            // Assume ~3h event duration (typical for most sports)
+            calEvent.DtEnd = new Ical.Net.DataTypes.CalDateTime(evt.EventDate.AddHours(3), "UTC");
+        }
+
+        // Status: CONFIRMED if files exist (downloaded), TENTATIVE if pending
+        var hasFiles = evt.Files != null && evt.Files.Any();
+        calEvent.Status = hasFiles ? "CONFIRMED" : "TENTATIVE";
+
+        calendar.Events.Add(calEvent);
+    }
+
+    var serializer = new Ical.Net.Serialization.CalendarSerializer();
+    var icalString = serializer.SerializeToString(calendar);
+
+    return Results.Text(icalString, "text/calendar", System.Text.Encoding.UTF8);
+});
+
+// ========================================
 // PROWLARR INTEGRATION - Sonarr/Radarr-Compatible Application API
 // ========================================
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeftIcon, ChevronRightIcon, TvIcon, FunnelIcon, CalendarDaysIcon, XCircleIcon } from '@heroicons/react/24/outline';
+import { ChevronLeftIcon, ChevronRightIcon, TvIcon, FunnelIcon, CalendarDaysIcon, XCircleIcon, LinkIcon, ClipboardDocumentIcon, ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline';
 import { CheckCircleIcon } from '@heroicons/react/24/solid';
 import { useNavigate } from 'react-router-dom';
 import PageShell, { PageErrorState, PageLoadingState } from '../components/PageShell';
@@ -312,6 +312,8 @@ export default function CalendarPage() {
   const [currentView, setCurrentView] = useState<CalendarView>('month');
   const [filterSport, setFilterSport] = useState<string>('all');
   const [filterTvOnly, setFilterTvOnly] = useState(false);
+  const [showIcalModal, setShowIcalModal] = useState(false);
+  const [icalCopied, setIcalCopied] = useState(false);
   const firstDayOfWeek: FirstDayOfWeek = uiSettings.firstDayOfWeek === 'monday' ? 'monday' : 'sunday';
 
   useEffect(() => {
@@ -594,6 +596,18 @@ export default function CalendarPage() {
                     </button>
                   )}
                 </div>
+
+                {/* iCal Feed Link */}
+                <div className={TOOLBAR_GROUP_CLASS}>
+                  <button
+                    onClick={() => { setShowIcalModal(true); setIcalCopied(false); }}
+                    className={`${TOOLBAR_BUTTON_BASE_CLASS} ${TOOLBAR_BUTTON_INACTIVE_CLASS} flex items-center gap-1.5`}
+                    title="iCal calendar subscription link"
+                  >
+                    <LinkIcon className="h-4 w-4" />
+                    <span>iCal</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -728,6 +742,50 @@ export default function CalendarPage() {
           </div>
         </div>
       </div>
+
+      {/* iCal Subscription Modal */}
+      {showIcalModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setShowIcalModal(false)}>
+          <div className="mx-4 w-full max-w-lg rounded-xl bg-gray-800 p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-white">iCal Calendar Subscription</h2>
+              <button onClick={() => setShowIcalModal(false)} className="text-gray-400 hover:text-white">
+                <XCircleIcon className="h-6 w-6" />
+              </button>
+            </div>
+            <p className="mb-4 text-sm text-gray-400">
+              Subscribe to this URL in Google Calendar, Apple Calendar, or Outlook to sync your Sportarr events.
+            </p>
+            <div className="mb-4 flex items-center gap-2">
+              <input
+                type="text"
+                readOnly
+                value={`${window.location.origin}/api/calendar.ics?apikey=${window.Sportarr?.apiKey || ''}`}
+                className="flex-1 rounded-lg bg-gray-900 px-3 py-2 text-sm text-gray-300 focus:outline-none"
+                onFocus={(e) => e.target.select()}
+              />
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(`${window.location.origin}/api/calendar.ics?apikey=${window.Sportarr?.apiKey || ''}`);
+                  setIcalCopied(true);
+                  setTimeout(() => setIcalCopied(false), 3000);
+                }}
+                className="flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700"
+              >
+                {icalCopied ? (
+                  <><ClipboardDocumentCheckIcon className="h-4 w-4" /> Copied</>
+                ) : (
+                  <><ClipboardDocumentIcon className="h-4 w-4" /> Copy</>
+                )}
+              </button>
+            </div>
+            <div className="space-y-2 text-xs text-gray-500">
+              <p>Optional parameters: pastDays, futureDays, unmonitored, leagueId, asAllDay</p>
+              <p>Example: ...calendar.ics?apikey=KEY&amp;pastDays=30&amp;futureDays=90</p>
+            </div>
+          </div>
+        </div>
+      )}
     </PageShell>
   );
 }
