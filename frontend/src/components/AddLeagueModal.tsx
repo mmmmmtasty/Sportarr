@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo, useRef, Fragment } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { MagnifyingGlassIcon, XMarkIcon, CheckIcon } from '@heroicons/react/24/outline';
+import { MagnifyingGlassIcon, XMarkIcon, CheckIcon, InformationCircleIcon } from '@heroicons/react/24/outline';
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '../utils/api';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY } from '../utils/designTokens';
+import TagSelector from './TagSelector';
 
 interface Team {
   idTeam: string;
@@ -46,7 +47,9 @@ interface AddLeagueModalProps {
     monitoredParts: string | null,
     applyMonitoredPartsToEvents: boolean,
     monitoredSessionTypes: string | null,
-    monitoredEventTypes: string | null
+    monitoredEventTypes: string | null,
+    searchQueryTemplate: string | null,
+    tags: number[]
   ) => void;
   isAdding: boolean;
   editMode?: boolean;
@@ -148,6 +151,10 @@ export default function AddLeagueModal({ league, isOpen, onClose, onAdd, isAddin
   // For UFC-style fighting leagues: event types to monitor (PPV, Fight Night, DWCS)
   const [monitoredEventTypes, setMonitoredEventTypes] = useState<Set<string>>(new Set());
   const [selectAllEventTypes, setSelectAllEventTypes] = useState(false);
+  // Custom search query template (edit mode only)
+  const [searchQueryTemplate, setSearchQueryTemplate] = useState('');
+  // Tags
+  const [selectedTags, setSelectedTags] = useState<number[]>([]);
 
   // enable team based filtering on league add --> teams to monitor
   const [searchQuery, setSearchQuery] = useState('');
@@ -293,6 +300,8 @@ export default function AddLeagueModal({ league, isOpen, onClose, onAdd, isAddin
         monitoredEventTypes: existingLeague.monitoredEventTypes,
         searchForMissingEvents: existingLeague.searchForMissingEvents,
         searchForCutoffUnmetEvents: existingLeague.searchForCutoffUnmetEvents,
+        searchQueryTemplate: existingLeague.searchQueryTemplate,
+        tags: existingLeague.tags,
         availableSessionTypesCount: availableSessionTypes.length, // Include to re-run when session types load
         availableEventTypesCount: availableEventTypes.length, // Include to re-run when event types load
       });
@@ -308,6 +317,8 @@ export default function AddLeagueModal({ league, isOpen, onClose, onAdd, isAddin
       setQualityProfileId(existingLeague.qualityProfileId || null);
       setSearchForMissingEvents(existingLeague.searchForMissingEvents || false);
       setSearchForCutoffUnmetEvents(existingLeague.searchForCutoffUnmetEvents || false);
+      setSearchQueryTemplate(existingLeague.searchQueryTemplate || '');
+      setSelectedTags(existingLeague.tags || []);
 
       // Load monitored parts (only for fighting sports)
       // null = all parts monitored (default)
@@ -396,6 +407,8 @@ export default function AddLeagueModal({ league, isOpen, onClose, onAdd, isAddin
       setQualityProfileId(qualityProfiles.length > 0 ? qualityProfiles[0].id : null);
       setSearchForMissingEvents(false);
       setSearchForCutoffUnmetEvents(false);
+      setSearchQueryTemplate('');
+      setSelectedTags([]);
 
       // For fighting sports: default to all parts selected
       // Other sports (including motorsports) don't use parts
@@ -590,7 +603,9 @@ export default function AddLeagueModal({ league, isOpen, onClose, onAdd, isAddin
       partsString,
       applyMonitoredPartsToEvents,
       sessionTypesString,
-      eventTypesString
+      eventTypesString,
+      searchQueryTemplate.trim() || null,
+      selectedTags
     );
   };
 
@@ -1022,6 +1037,38 @@ export default function AddLeagueModal({ league, isOpen, onClose, onAdd, isAddin
                         <div className="text-xs text-gray-400">Search for quality upgrades when league is added or settings change</div>
                       </div>
                     </label>
+                  </div>
+
+                  {/* Custom Search Query Template */}
+                  <div className="mt-4">
+                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                      Custom Search Query Template
+                    </label>
+                    <input
+                      type="text"
+                      value={searchQueryTemplate}
+                      onChange={(e) => setSearchQueryTemplate(e.target.value)}
+                      placeholder="e.g. {League} {Year} {Month} {Day}"
+                      className="w-full px-3 py-2 bg-black border border-red-900/30 rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600"
+                    />
+                    <div className="flex items-start gap-1.5 mt-2">
+                      <InformationCircleIcon className="w-4 h-4 text-gray-500 flex-shrink-0 mt-0.5" />
+                      <p className="text-xs text-gray-500">
+                        Override the default search query pattern. Available tokens:{' '}
+                        <span className="text-gray-400">{'{League}'} {'{Year}'} {'{Month}'} {'{Day}'} {'{Round}'} {'{Round:00}'} {'{Week}'} {'{EventTitle}'} {'{HomeTeam}'} {'{AwayTeam}'} {'{vs}'} {'{Season}'}</span>.
+                        Leave blank to use the built-in query logic.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Tags */}
+                  <div className="mt-4">
+                    <TagSelector
+                      selectedTags={selectedTags}
+                      onChange={setSelectedTags}
+                      label="Tags"
+                      helpText="Assign tags to control which indexers are used for this league."
+                    />
                   </div>
                 </div>
 

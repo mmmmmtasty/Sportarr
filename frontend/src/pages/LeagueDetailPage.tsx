@@ -512,6 +512,7 @@ export default function LeagueDetailPage() {
       monitoredEventTypes?: string | null;
       monitoredTeamIds?: string[];
       tags?: number[];
+      searchQueryTemplate?: string | null;
     }) => {
       const isMotorsportLeague = league?.sport ? isMotorsport(league.sport) : false;
 
@@ -643,6 +644,8 @@ export default function LeagueDetailPage() {
     applyMonitoredPartsToEvents: boolean,
     monitoredSessionTypes: string | null,
     monitoredEventTypes: string | null,
+    searchQueryTemplate: string | null,
+    tags: number[],
   ) => {
     updateLeagueSettingsMutation.mutate({
       monitoredTeamIds,
@@ -654,6 +657,8 @@ export default function LeagueDetailPage() {
       applyMonitoredPartsToEvents,
       monitoredSessionTypes,
       monitoredEventTypes,
+      searchQueryTemplate,
+      tags,
     });
   };
 

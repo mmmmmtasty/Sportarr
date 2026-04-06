@@ -173,7 +173,9 @@ export default function LeagueSearchPage() {
       searchForCutoffUnmetEvents,
       monitoredParts,
       monitoredSessionTypes,
-      monitoredEventTypes
+      monitoredEventTypes,
+      searchQueryTemplate,
+      tags
     }: {
       league: League;
       monitoredTeamIds: string[];
@@ -184,6 +186,8 @@ export default function LeagueSearchPage() {
       monitoredParts: string | null;
       monitoredSessionTypes: string | null;
       monitoredEventTypes: string | null;
+      searchQueryTemplate?: string | null;
+      tags?: number[];
     }) => {
       // For motorsports, golf, individual tennis (ATP, WTA), and UFC-style fighting leagues, league is always monitored
       // For other sports, league is monitored only if teams are selected
@@ -207,6 +211,8 @@ export default function LeagueSearchPage() {
         monitoredParts: monitoredParts,
         monitoredSessionTypes: monitoredSessionTypes,
         monitoredEventTypes: monitoredEventTypes,
+        searchQueryTemplate: searchQueryTemplate,
+        tags: tags,
         logoUrl: league.strBadge || league.strLogo,
         bannerUrl: league.strBanner,
         posterUrl: league.strPoster,
@@ -264,6 +270,8 @@ export default function LeagueSearchPage() {
       monitoredSessionTypes,
       monitoredEventTypes,
       applyMonitoredPartsToEvents,
+      searchQueryTemplate,
+      tags,
       sport,
       leagueName
     }: {
@@ -277,6 +285,8 @@ export default function LeagueSearchPage() {
       monitoredSessionTypes: string | null;
       monitoredEventTypes: string | null;
       applyMonitoredPartsToEvents: boolean;
+      searchQueryTemplate?: string | null;
+      tags?: number[];
       sport: string;
       leagueName: string;
     }) => {
@@ -299,6 +309,8 @@ export default function LeagueSearchPage() {
         monitoredSessionTypes: monitoredSessionTypes,
         monitoredEventTypes: monitoredEventTypes,
         applyMonitoredPartsToEvents: applyMonitoredPartsToEvents,
+        searchQueryTemplate: searchQueryTemplate,
+        tags: tags,
       });
 
       if (!settingsResponse.ok) {
@@ -433,6 +445,8 @@ export default function LeagueSearchPage() {
     applyMonitoredPartsToEvents: boolean,
     monitoredSessionTypes: string | null,
     monitoredEventTypes: string | null,
+    searchQueryTemplate: string | null,
+    tags: number[],
   ) => {
     const modalData = addModalDataRef.current;
     if (modalData?.editMode && modalData.leagueId) {
@@ -447,6 +461,8 @@ export default function LeagueSearchPage() {
         monitoredSessionTypes,
         monitoredEventTypes,
         applyMonitoredPartsToEvents,
+        searchQueryTemplate,
+        tags,
         sport: league.strSport,
         leagueName: league.strLeague
       });
@@ -460,7 +476,9 @@ export default function LeagueSearchPage() {
         searchForCutoffUnmetEvents,
         monitoredParts,
         monitoredSessionTypes,
-        monitoredEventTypes
+        monitoredEventTypes,
+        searchQueryTemplate,
+        tags
       });
     }
   };
