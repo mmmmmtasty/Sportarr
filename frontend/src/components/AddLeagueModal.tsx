@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, Fragment } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { MagnifyingGlassIcon, XMarkIcon, CheckIcon, InformationCircleIcon } from '@heroicons/react/24/outline';
 import { useQuery } from '@tanstack/react-query';
-import { apiGet } from '../utils/api';
+import { apiGet, apiPost } from '../utils/api';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY } from '../utils/designTokens';
 import TagSelector from './TagSelector';
 
@@ -151,8 +151,11 @@ export default function AddLeagueModal({ league, isOpen, onClose, onAdd, isAddin
   // For UFC-style fighting leagues: event types to monitor (PPV, Fight Night, DWCS)
   const [monitoredEventTypes, setMonitoredEventTypes] = useState<Set<string>>(new Set());
   const [selectAllEventTypes, setSelectAllEventTypes] = useState(false);
-  // Custom search query template (edit mode only)
+  // Custom search query template
   const [searchQueryTemplate, setSearchQueryTemplate] = useState('');
+  const [searchTemplatePreview, setSearchTemplatePreview] = useState<{ template: string; samples: { eventTitle: string; eventDate: string; generatedQuery: string }[] } | null>(null);
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+  const searchTemplateInputRef = useRef<HTMLInputElement>(null);
   // Tags
   const [selectedTags, setSelectedTags] = useState<number[]>([]);
 
@@ -318,6 +321,7 @@ export default function AddLeagueModal({ league, isOpen, onClose, onAdd, isAddin
       setSearchForMissingEvents(existingLeague.searchForMissingEvents || false);
       setSearchForCutoffUnmetEvents(existingLeague.searchForCutoffUnmetEvents || false);
       setSearchQueryTemplate(existingLeague.searchQueryTemplate || '');
+      setSearchTemplatePreview(null);
       setSelectedTags(existingLeague.tags || []);
 
       // Load monitored parts (only for fighting sports)
@@ -408,6 +412,7 @@ export default function AddLeagueModal({ league, isOpen, onClose, onAdd, isAddin
       setSearchForMissingEvents(false);
       setSearchForCutoffUnmetEvents(false);
       setSearchQueryTemplate('');
+      setSearchTemplatePreview(null);
       setSelectedTags([]);
 
       // For fighting sports: default to all parts selected
@@ -607,6 +612,55 @@ export default function AddLeagueModal({ league, isOpen, onClose, onAdd, isAddin
       searchQueryTemplate.trim() || null,
       selectedTags
     );
+  };
+
+  const searchTokens = [
+    { token: '{League}', description: 'League name' },
+    { token: '{Year}', description: 'Event year' },
+    { token: '{Month}', description: 'Month (2 digits)' },
+    { token: '{Day}', description: 'Day (2 digits)' },
+    { token: '{Round}', description: 'Round number (zero-padded, e.g., 01)' },
+    { token: '{Round:0}', description: 'Round number (no padding, e.g., 1)' },
+    { token: '{Week}', description: 'Week number' },
+    { token: '{EventTitle}', description: 'Event title' },
+    { token: '{HomeTeam}', description: 'Home team' },
+    { token: '{AwayTeam}', description: 'Away team' },
+    { token: '{Season}', description: 'Season' },
+  ];
+
+  const insertToken = (token: string) => {
+    const input = searchTemplateInputRef.current;
+    if (input) {
+      const start = input.selectionStart ?? searchQueryTemplate.length;
+      const end = input.selectionEnd ?? searchQueryTemplate.length;
+      const newValue = searchQueryTemplate.slice(0, start) + token + searchQueryTemplate.slice(end);
+      setSearchQueryTemplate(newValue);
+      // Restore cursor after React re-render
+      requestAnimationFrame(() => {
+        input.focus();
+        const cursorPos = start + token.length;
+        input.setSelectionRange(cursorPos, cursorPos);
+      });
+    } else {
+      setSearchQueryTemplate(prev => prev + token);
+    }
+  };
+
+  const loadSearchTemplatePreview = async () => {
+    if (!leagueId) return;
+    setIsLoadingPreview(true);
+    try {
+      const response = await apiPost(`/api/leagues/${leagueId}/search-template-preview`, {
+        template: searchQueryTemplate.trim() || null,
+      });
+      if (response.ok) {
+        setSearchTemplatePreview(await response.json());
+      }
+    } catch {
+      // Preview is best-effort
+    } finally {
+      setIsLoadingPreview(false);
+    }
   };
 
   // Calculate derived values only when league exists
@@ -1040,25 +1094,72 @@ export default function AddLeagueModal({ league, isOpen, onClose, onAdd, isAddin
                   </div>
 
                   {/* Custom Search Query Template */}
-                  <div className="mt-4">
-                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                  <div className="mt-6 pt-4 border-t border-red-900/20">
+                    <label className="block text-sm font-medium text-gray-300 mb-1">
                       Custom Search Query Template
                     </label>
-                    <input
-                      type="text"
-                      value={searchQueryTemplate}
-                      onChange={(e) => setSearchQueryTemplate(e.target.value)}
-                      placeholder="e.g. {League} {Year} {Month} {Day}"
-                      className="w-full px-3 py-2 bg-black border border-red-900/30 rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600"
-                    />
-                    <div className="flex items-start gap-1.5 mt-2">
-                      <InformationCircleIcon className="w-4 h-4 text-gray-500 flex-shrink-0 mt-0.5" />
-                      <p className="text-xs text-gray-500">
-                        Override the default search query pattern. Available tokens:{' '}
-                        <span className="text-gray-400">{'{League}'} {'{Year}'} {'{Month}'} {'{Day}'} {'{Round}'} {'{Round:00}'} {'{Week}'} {'{EventTitle}'} {'{HomeTeam}'} {'{AwayTeam}'} {'{vs}'} {'{Season}'}</span>.
-                        Leave blank to use the built-in query logic.
-                      </p>
+                    <p className="text-xs text-gray-500 mb-2">
+                      Override the default search query pattern. Leave blank to use the built-in query logic.
+                    </p>
+                    <div className="flex gap-2">
+                      <input
+                        ref={searchTemplateInputRef}
+                        type="text"
+                        value={searchQueryTemplate}
+                        onChange={(e) => { setSearchQueryTemplate(e.target.value); setSearchTemplatePreview(null); }}
+                        placeholder="e.g. {League} {Year} {Month} {Day}"
+                        className="flex-1 px-3 py-2 bg-black border border-red-900/30 rounded-lg text-white placeholder-gray-600 text-sm focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600"
+                      />
+                      {editMode && leagueId && (
+                        <button
+                          type="button"
+                          onClick={loadSearchTemplatePreview}
+                          disabled={isLoadingPreview}
+                          className="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium rounded-lg transition-colors disabled:opacity-50"
+                        >
+                          {isLoadingPreview ? 'Loading...' : 'Preview'}
+                        </button>
+                      )}
                     </div>
+
+                    {/* Clickable Token Buttons */}
+                    <div className="mt-2">
+                      <label className="block text-xs text-gray-500 mb-1.5">Available Tokens (click to insert)</label>
+                      <div className="flex flex-wrap gap-1">
+                        {searchTokens.map((t) => (
+                          <button
+                            key={t.token}
+                            type="button"
+                            onClick={() => insertToken(t.token)}
+                            className="px-2 py-1 bg-gray-800 hover:bg-gray-700 text-white text-xs rounded transition-colors"
+                            title={t.description}
+                          >
+                            {t.token}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Preview Results */}
+                    {searchTemplatePreview && (
+                      <div className="mt-3 bg-gray-800/50 border border-gray-700 rounded-lg p-3">
+                        <div className="text-xs font-medium text-gray-400 mb-2">
+                          Preview ({searchTemplatePreview.template === '(default)' ? 'Using default query generation' : `Template: ${searchTemplatePreview.template}`})
+                        </div>
+                        {searchTemplatePreview.samples.length === 0 ? (
+                          <p className="text-xs text-gray-500">No events found to preview</p>
+                        ) : (
+                          <div className="space-y-1.5">
+                            {searchTemplatePreview.samples.map((sample, idx) => (
+                              <div key={idx} className="text-xs">
+                                <div className="text-gray-400">{sample.eventTitle} ({sample.eventDate})</div>
+                                <div className="text-green-400 font-mono">&#x2192; {sample.generatedQuery}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Tags */}
