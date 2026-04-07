@@ -13338,6 +13338,9 @@ app.MapGet("/api/calendar.ics", async (
             calEvent.Categories = new List<string> { evt.Sport };
 
         // Date/Time
+        // IMPORTANT: Explicitly set HasTime=true on timed events. When EventDate is midnight UTC
+        // (TheSportsDB didn't provide a start time), Ical.Net may default HasTime=false and
+        // serialize as VALUE=DATE which calendar apps render as "All Day" instead of timed.
         if (allDay)
         {
             calEvent.IsAllDay = true;
@@ -13346,9 +13349,13 @@ app.MapGet("/api/calendar.ics", async (
         }
         else
         {
-            calEvent.DtStart = new Ical.Net.DataTypes.CalDateTime(evt.EventDate, "UTC");
+            var dtStart = new Ical.Net.DataTypes.CalDateTime(evt.EventDate, "UTC");
+            dtStart.HasTime = true;
+            calEvent.DtStart = dtStart;
             // Assume ~3h event duration (typical for most sports)
-            calEvent.DtEnd = new Ical.Net.DataTypes.CalDateTime(evt.EventDate.AddHours(3), "UTC");
+            var dtEnd = new Ical.Net.DataTypes.CalDateTime(evt.EventDate.AddHours(3), "UTC");
+            dtEnd.HasTime = true;
+            calEvent.DtEnd = dtEnd;
         }
 
         // Status: CONFIRMED if files exist (downloaded), TENTATIVE if pending
