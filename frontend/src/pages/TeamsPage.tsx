@@ -158,9 +158,12 @@ export default function TeamsPage() {
 
   // Debug: log data types to diagnose .map crash
   if (typeof window !== 'undefined' && (window as any).__SPORTARR_DEBUG_TEAMS !== false) {
-    console.log('[TeamsPage] allTeams type:', typeof allTeams, 'isArray:', Array.isArray(allTeams), 'length:', allTeams?.length);
-    console.log('[TeamsPage] followedTeams type:', typeof followedTeams, 'isArray:', Array.isArray(followedTeams), 'length:', followedTeams?.length);
-    console.log('[TeamsPage] discoveredLeagues type:', typeof discoveredLeagues, 'isArray:', Array.isArray(discoveredLeagues), 'length:', discoveredLeagues?.length);
+    console.log('[TeamsPage] allTeams:', Array.isArray(allTeams), allTeams?.length);
+    console.log('[TeamsPage] followedTeams:', Array.isArray(followedTeams), followedTeams?.length, followedTeams);
+    console.log('[TeamsPage] discoveredLeagues:', Array.isArray(discoveredLeagues), discoveredLeagues?.length, discoveredLeagues);
+    console.log('[TeamsPage] qualityProfiles:', typeof qualityProfiles, Array.isArray(qualityProfiles), qualityProfiles);
+    console.log('[TeamsPage] expandedTeamId:', expandedTeamId);
+    console.log('[TeamsPage] compactView:', compactView);
   }
 
   const followedTeamIds = useMemo(() => {
@@ -848,10 +851,17 @@ export default function TeamsPage() {
               renderCompactTable()
             ) : filteredTeams.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredTeams.map((team) => {
-                  const isFollowed = team.externalId ? followedTeamIds.has(team.externalId) : false;
-                  const isExpanded = expandedTeamId === team.externalId;
-                  const followedTeam = team.externalId ? getFollowedTeam(team.externalId) : null;
+                {filteredTeams.map((team, _teamIdx) => {
+                  let isFollowed = false;
+                  let isExpanded = false;
+                  let followedTeam: FollowedTeam | null | undefined = null;
+                  try {
+                    isFollowed = team.externalId ? followedTeamIds.has(team.externalId) : false;
+                    isExpanded = expandedTeamId === team.externalId;
+                    followedTeam = team.externalId ? getFollowedTeam(team.externalId) : null;
+                  } catch (err) {
+                    console.error('[TeamsPage] Error in card .map iteration:', _teamIdx, team, err);
+                  }
 
                   return (
                     <div
@@ -943,7 +953,7 @@ export default function TeamsPage() {
                         </div>
                       </div>
 
-                      {isExpanded && team.externalId && renderExpandedLeagues(team.name, team.externalId)}
+                      {isExpanded && team.externalId && (() => { try { return renderExpandedLeagues(team.name, team.externalId); } catch (e) { console.error('[TeamsPage] renderExpandedLeagues crashed:', e, { teamName: team.name, teamExternalId: team.externalId, discoveredLeagues, qualityProfiles, expandedTeamId }); return <div className="p-4 text-red-400">Error loading leagues panel</div>; } })()}
                     </div>
                   );
                 })}
