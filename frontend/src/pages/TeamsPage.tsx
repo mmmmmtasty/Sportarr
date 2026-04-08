@@ -151,20 +151,11 @@ export default function TeamsPage() {
   const { data: qualityProfiles } = useQuery({
     queryKey: ['quality-profiles'],
     queryFn: async () => {
-      const response = await apiClient.get<QualityProfile[]>('/settings/quality-profiles');
+      const response = await apiClient.get<QualityProfile[]>('/qualityprofile');
+      if (!Array.isArray(response.data)) return [];
       return response.data;
     },
   });
-
-  // Debug: log data types to diagnose .map crash
-  if (typeof window !== 'undefined' && (window as any).__SPORTARR_DEBUG_TEAMS !== false) {
-    console.log('[TeamsPage] allTeams:', Array.isArray(allTeams), allTeams?.length);
-    console.log('[TeamsPage] followedTeams:', Array.isArray(followedTeams), followedTeams?.length, followedTeams);
-    console.log('[TeamsPage] discoveredLeagues:', Array.isArray(discoveredLeagues), discoveredLeagues?.length, discoveredLeagues);
-    console.log('[TeamsPage] qualityProfiles:', typeof qualityProfiles, Array.isArray(qualityProfiles), qualityProfiles);
-    console.log('[TeamsPage] expandedTeamId:', expandedTeamId);
-    console.log('[TeamsPage] compactView:', compactView);
-  }
 
   const followedTeamIds = useMemo(() => {
     const ids = new Set<string>();
@@ -953,7 +944,7 @@ export default function TeamsPage() {
                         </div>
                       </div>
 
-                      {isExpanded && team.externalId && (() => { try { return renderExpandedLeagues(team.name, team.externalId); } catch (e) { console.error('[TeamsPage] renderExpandedLeagues crashed:', e, { teamName: team.name, teamExternalId: team.externalId, discoveredLeagues, qualityProfiles, expandedTeamId }); return <div className="p-4 text-red-400">Error loading leagues panel</div>; } })()}
+                      {isExpanded && team.externalId && renderExpandedLeagues(team.name, team.externalId)}
                     </div>
                   );
                 })}
