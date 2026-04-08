@@ -408,7 +408,7 @@ export default function UISettings({ showAdvanced = false }: UISettingsProps) {
               onChange={(e) => updateSetting('eventViewMode', e.target.value)}
               className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-red-600"
             >
-              <option value="auto">Auto (Compact on wide screens, spacious on narrow)</option>
+              <option value="auto">Auto (Spacious on wide screens, compact on narrow)</option>
               <option value="compact">Compact (Table rows)</option>
               <option value="spacious">Spacious (Cards)</option>
             </select>

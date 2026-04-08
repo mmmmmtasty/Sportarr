@@ -28,7 +28,7 @@ export function useCompactView(): boolean {
   const wideScreen = useIsWideScreen();
 
   if (loading) {
-    return wideScreen;
+    return !wideScreen;
   }
 
   if (eventViewMode === 'compact') {
@@ -39,5 +39,7 @@ export function useCompactView(): boolean {
     return false;
   }
 
-  return wideScreen;
+  // Auto mode: wide screens get spacious cards (more space for rich layout),
+  // narrow screens get compact tables (dense data in limited space)
+  return !wideScreen;
 }
