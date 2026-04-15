@@ -47,3 +47,12 @@ export function isFightingSport(sport: string): boolean {
   const fightingSports = ['Fighting', 'MMA', 'UFC', 'Boxing', 'Kickboxing', 'Wrestling'];
   return fightingSports.some(s => sport.toLowerCase().includes(s.toLowerCase()));
 }
+
+/**
+ * Returns true for individual-player racket/cue sports (Badminton, Table Tennis, Snooker).
+ * Tournaments feature individual players, not teams - all events should sync without team filtering.
+ */
+export function isIndividualRacketOrCueSport(sport: string): boolean {
+  const s = sport.toLowerCase();
+  return s === 'badminton' || s === 'table tennis' || s === 'snooker';
+}

@@ -79,10 +79,13 @@ public class LeagueEventSyncService
         // - Darts: matches are between individual players, not teams
         // - Climbing: individual climbers compete, not teams
         // - Gambling (Poker, WSOP): individual players compete in tournaments, not teams
+        // - Badminton (BWF World Tour): individual players compete in tournaments, not teams
+        // - Table Tennis: individual players compete in tournaments, not teams
+        // - Snooker: individual players compete in tournaments, not teams
         // - Individual Tennis (ATP, WTA): matches are between players, not teams
         //   Note: Team-based tennis (Fed Cup, Davis Cup, Olympics) still needs team filtering
         var monitoredTeamIds = new HashSet<string>();
-        var sportsWithoutTeamFiltering = new[] { "Fighting", "Cycling", "Motorsport", "Golf", "Darts", "Climbing", "Gambling" };
+        var sportsWithoutTeamFiltering = new[] { "Fighting", "Cycling", "Motorsport", "Golf", "Darts", "Climbing", "Gambling", "Badminton", "Table Tennis", "Snooker" };
         var isIndividualTennis = IsIndividualTennisLeague(league.Sport, league.Name);
 
         if (!sportsWithoutTeamFiltering.Contains(league.Sport, StringComparer.OrdinalIgnoreCase) && !isIndividualTennis)
