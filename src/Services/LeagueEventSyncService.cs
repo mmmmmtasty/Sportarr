@@ -85,10 +85,8 @@ public class LeagueEventSyncService
         // - Individual Tennis (ATP, WTA): matches are between players, not teams
         //   Note: Team-based tennis (Fed Cup, Davis Cup, Olympics) still needs team filtering
         var monitoredTeamIds = new HashSet<string>();
-        var sportsWithoutTeamFiltering = new[] { "Fighting", "Cycling", "Motorsport", "Golf", "Darts", "Climbing", "Gambling", "Badminton", "Table Tennis", "Snooker" };
-        var isIndividualTennis = IsIndividualTennisLeague(league.Sport, league.Name);
 
-        if (!sportsWithoutTeamFiltering.Contains(league.Sport, StringComparer.OrdinalIgnoreCase) && !isIndividualTennis)
+        if (!LeagueSportRules.IsTeamlessSport(league.Sport, league.Name))
         {
             monitoredTeamIds = league.MonitoredTeams
                 .Where(lt => lt.Monitored && lt.Team != null)
@@ -107,10 +105,6 @@ public class LeagueEventSyncService
             {
                 _logger.LogInformation("[League Event Sync] No team filtering - will sync all events in league");
             }
-        }
-        else if (isIndividualTennis)
-        {
-            _logger.LogInformation("[League Event Sync] Individual tennis league (ATP/WTA) - team filtering disabled (matches between players, not teams)");
         }
         else
         {
@@ -934,24 +928,6 @@ public class LeagueEventSyncService
         return false;
     }
 
-    /// <summary>
-    /// Check if a tennis league is individual-based (ATP, WTA) vs team-based (Fed Cup, Davis Cup, Olympics)
-    /// Individual tennis leagues don't have meaningful team data - matches are between players, not teams
-    /// </summary>
-    private static bool IsIndividualTennisLeague(string sport, string leagueName)
-    {
-        if (!sport.Equals("Tennis", StringComparison.OrdinalIgnoreCase)) return false;
-
-        var nameLower = leagueName.ToLowerInvariant();
-
-        // Team-based tennis competitions - these DO need team filtering
-        var teamBased = new[] { "fed cup", "davis cup", "olympic", "billie jean king" };
-        if (teamBased.Any(t => nameLower.Contains(t))) return false;
-
-        // Individual tours - no team selection needed, sync all events
-        var individualTours = new[] { "atp", "wta" };
-        return individualTours.Any(t => nameLower.Contains(t));
-    }
 }
 
 /// <summary>

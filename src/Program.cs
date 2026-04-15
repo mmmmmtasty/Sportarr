@@ -10382,20 +10382,12 @@ app.MapGet("/api/leagues/{id:int}/events", async (int id, SportarrDbContext db, 
     }
     else
     {
-        // Regular sports: filter by monitored teams
-        // Note: Disable team-based filtering for certain sports (same as sync service)
-        // - Fighting: "teams" are weight classes, not actual participants
-        // - Cycling: races don't have home/away teams, all teams participate
-        // - Motorsport handled above, but included here for consistency
-        // - Golf: tournaments have all players competing together, not home/away teams
-        // - Darts: matches are between individual players, not teams
-        // - Climbing: individual climbers compete, not teams
-        // - Gambling (Poker, WSOP): individual players compete in tournaments, not teams
-        // Note: Tennis NOT exempt - Fed Cup/Davis Cup/Olympics are team-based
-        var sportsWithoutTeamFiltering = new[] { "Fighting", "Cycling", "Motorsport", "Golf", "Darts", "Climbing", "Gambling" };
+        // Regular sports: filter by monitored teams.
+        // Teamless sports (see LeagueSportRules.IsTeamlessSport) bypass team
+        // filtering since they have no meaningful home/away team structure.
         var monitoredTeamIds = new HashSet<string>();
 
-        if (!sportsWithoutTeamFiltering.Contains(league.Sport, StringComparer.OrdinalIgnoreCase))
+        if (!Sportarr.Api.Services.LeagueSportRules.IsTeamlessSport(league.Sport, league.Name))
         {
             monitoredTeamIds = league.MonitoredTeams
                 .Where(lt => lt.Monitored && lt.Team != null)
@@ -11379,14 +11371,16 @@ app.MapPost("/api/leagues", async (HttpContext context, SportarrDbContext db, IS
         }
         else
         {
-            // Check if this is a league type that doesn't require team selection
-            var isMotorsport = league.Sport == "Motorsport";
+            // Check if this is a league type that doesn't require team selection.
+            // Teamless sports (motorsport, golf, darts, climbing, gambling,
+            // badminton, table tennis, snooker, individual tennis, fighting)
+            // auto-monitor without team selection.
+            var isTeamless = Sportarr.Api.Services.LeagueSportRules.IsTeamlessSport(league.Sport, league.Name);
             var isGolf = league.Sport.Equals("Golf", StringComparison.OrdinalIgnoreCase);
             var isIndividualTennis = IsIndividualTennisLeague(league.Sport, league.Name);
-
             var isFightingSport = Sportarr.Api.Services.EventPartDetector.IsFightingSport(league.Sport);
 
-            if (!isMotorsport && !isGolf && !isIndividualTennis && !isFightingSport)
+            if (!isTeamless)
             {
                 // Team sports (NBA, NFL, NHL, etc.) require team selection to know which events to sync
                 logger.LogInformation("[LEAGUES] No teams selected - league added but not monitored (no events will be synced)");
