@@ -56,3 +56,42 @@ export function isIndividualRacketOrCueSport(sport: string): boolean {
   const s = sport.toLowerCase();
   return s === 'badminton' || s === 'table tennis' || s === 'snooker';
 }
+
+/**
+ * Darts matches are between individual players, not teams.
+ */
+export function isDarts(sport: string): boolean {
+  return sport.toLowerCase() === 'darts';
+}
+
+/**
+ * Climbing competitions are individual climbers, not teams.
+ */
+export function isClimbing(sport: string): boolean {
+  return sport.toLowerCase() === 'climbing';
+}
+
+/**
+ * Gambling (Poker, WSOP) events are individual players in tournaments, not teams.
+ */
+export function isGambling(sport: string): boolean {
+  return sport.toLowerCase() === 'gambling';
+}
+
+/**
+ * Returns true for sports/leagues that have no meaningful home/away team structure.
+ * These leagues should auto-monitor on add (no team selection required) and must
+ * stay in sync with the backend's sportsWithoutTeamFiltering list in
+ * LeagueEventSyncService.cs.
+ */
+export function isTeamlessSport(sport: string, leagueName: string): boolean {
+  return (
+    isMotorsport(sport) ||
+    isGolf(sport) ||
+    isDarts(sport) ||
+    isClimbing(sport) ||
+    isGambling(sport) ||
+    isIndividualRacketOrCueSport(sport) ||
+    isIndividualTennis(sport, leagueName)
+  );
+}

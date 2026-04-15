@@ -17,7 +17,7 @@ import { useUISettings } from '../hooks/useUISettings';
 import { useCompactView } from '../hooks/useCompactView';
 import { formatDateInTimezone } from '../utils/timezone';
 import { PAGE_PADDING, BUTTON_PRIMARY, BUTTON_SECONDARY, BUTTON_INFO, BUTTON_DESTRUCTIVE } from '../utils/designTokens';
-import { isMotorsport, isFightingSport } from '../utils/leagueSportRules';
+import { isFightingSport, isTeamlessSport } from '../utils/leagueSportRules';
 
 // Type for the league prop passed to AddLeagueModal
 interface ModalLeagueData {
@@ -514,7 +514,7 @@ export default function LeagueDetailPage() {
       tags?: number[];
       searchQueryTemplate?: string | null;
     }) => {
-      const isMotorsportLeague = league?.sport ? isMotorsport(league.sport) : false;
+      const isTeamless = league?.sport ? isTeamlessSport(league.sport, league.name ?? '') : false;
 
       // Build the payload - only include monitored if monitoredTeamIds was explicitly provided
       // This prevents inline settings changes (like monitorType dropdown) from accidentally
@@ -524,16 +524,14 @@ export default function LeagueDetailPage() {
 
       // Only recalculate monitored if monitoredTeamIds was explicitly provided (from edit modal)
       if (settings.monitoredTeamIds !== undefined) {
-        // For motorsports, league is always monitored
-        // For other sports, league is monitored only if teams are selected
-        payload.monitored = isMotorsportLeague ? true : (settings.monitoredTeamIds.length > 0);
+        payload.monitored = isTeamless ? true : (settings.monitoredTeamIds.length > 0);
       }
 
       // Update league settings
       const response = await apiClient.put(`/leagues/${id}`, payload);
 
-      // Update monitored teams (only for non-motorsport)
-      if (!isMotorsportLeague && settings.monitoredTeamIds !== undefined) {
+      // Update monitored teams (skip for teamless sports - they have no team selection)
+      if (!isTeamless && settings.monitoredTeamIds !== undefined) {
         await apiClient.put(`/leagues/${id}/teams`, {
           monitoredTeamIds: settings.monitoredTeamIds.length > 0 ? settings.monitoredTeamIds : null,
         });
