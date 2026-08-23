@@ -19,8 +19,8 @@ This is part of a four-PR chain. Each branch builds on the previous one; please 
 
 | | PR | Branch | Contents |
 |---|---|---|---|
-| 1 | #___ | `feat/league-alias-foundations` | Alias parsing, league alias persistence, unified league identity, token catalog |
-| 2 | #___ | `feat/league-alias-query-plan` | Structured query plan, bounded league-alias expansion |
+| 1 | #255 | `feat/league-alias-foundations` | Alias parsing, league alias persistence, unified league identity, token catalog |
+| 2 | mmmmmtasty#1 | `feat/league-alias-query-plan` | Structured query plan, bounded league-alias expansion |
 | 3 | #___ | `feat/per-indexer-search-cache` | Per-indexer result caching, full plan execution, opt-in strong-match stop |
 | 4 | #___ | `feat/advanced-league-search-settings` | Advanced Search Settings UI, structured preview, docs |
 
@@ -84,12 +84,14 @@ The identity enumeration adoption in `ReleaseMatchingService` and `LibraryImport
 
 **Base:** `feat/league-alias-foundations` (PR 1)
 
+**Opened as** [mmmmmtasty/Sportarr#1](https://github.com/mmmmmtasty/Sportarr/pull/1) — `Sportarr/Sportarr` has no `feat/league-alias-foundations` branch (PR 1 is a fork PR into `dev`) and we have no push rights upstream, so the stacked PR lives in the fork until PR 1 merges. Retarget to `dev` on `Sportarr/Sportarr` at that point.
+
 **Body:**
 
 ```markdown
 <!-- stack map here, marking PR 2 -->
 
-**Builds on #___ (PR 1).** Review that first; this branch contains its commits.
+**Builds on #255 (PR 1).** Review that first; this branch contains its commits.
 
 ## Why
 
