@@ -519,8 +519,14 @@ public class EventQueryService
     /// The form to record for a query that interpolates no league token at
     /// all - an event-title or surname-matchup query. The canonical league
     /// name is the honest answer: the league identifies the query, but no
-    /// spelling of it was used to build the text. Never a built-in spelling,
-    /// which would name a string that appears nowhere in the query.
+    /// spelling of it was used to build the text.
+    ///
+    /// The canonical form is preferred over the built-in query spelling for
+    /// exactly that reason. It is not always available: when the built-in
+    /// spelling equals the canonical name (league "NFL" normalizes to
+    /// "NFL"), LeagueQueryForms collapses the two into a single form whose
+    /// winning source is BuiltIn, so the Canonical lookup misses and this
+    /// falls back to the baseline - which is that same, identical string.
     /// </summary>
     private static LeagueNameForm? UntokenizedForm(LeagueFormSet forms) =>
         forms.All.FirstOrDefault(form => form.Source == LeagueNameFormSource.Canonical) ?? forms.Baseline;
@@ -575,13 +581,22 @@ public class EventQueryService
         // same text has several provenances the mandatory one wins, and the
         // other contributing forms are kept for preview diagnostics.
         var deduplicated = new List<QueryCandidate>();
+        // Where each surviving entry sits in emission order. An entry is
+        // normally anchored where its text first appeared, but a later
+        // MANDATORY candidate absorbing an earlier expansion re-anchors to
+        // its own emission position: the baseline belongs where the builder
+        // emitted it, not in the expansion's earlier slot, which would sort
+        // it ahead of the baselines emitted in between.
+        var anchors = new List<int>();
         var positions = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var candidate in candidates)
+        for (var emission = 0; emission < candidates.Count; emission++)
         {
+            var candidate = candidates[emission];
             if (!positions.TryGetValue(candidate.Text, out var position))
             {
                 positions[candidate.Text] = deduplicated.Count;
                 deduplicated.Add(candidate);
+                anchors.Add(emission);
                 continue;
             }
 
@@ -599,12 +614,26 @@ public class EventQueryService
                 }
             }
 
+            if (!kept.IsMandatory && candidate.IsMandatory)
+            {
+                anchors[position] = emission;
+            }
+
             deduplicated[position] = winner with
             {
                 IsMandatory = kept.IsMandatory || candidate.IsMandatory,
                 ContributingForms = contributing,
             };
         }
+
+        // Re-anchoring is the only thing that can disturb emission order, so
+        // a stable sort by anchor restores it for everything else.
+        var anchored = deduplicated
+            .Select((candidate, index) => (candidate, anchor: anchors[index], index))
+            .OrderBy(entry => entry.anchor)
+            .ThenBy(entry => entry.index)
+            .Select(entry => entry.candidate)
+            .ToList();
 
         // The complete alias-free baseline comes first, selected expansions
         // after it. Builders naturally emit an alias variant right next to
@@ -613,8 +642,8 @@ public class EventQueryService
         // invariant is enforced here, once, instead of being re-derived by
         // every builder. Both partitions keep the builder's own relative
         // order, which is where query priority actually lives.
-        var ordered = deduplicated.Where(candidate => candidate.IsMandatory)
-            .Concat(deduplicated.Where(candidate => !candidate.IsMandatory))
+        var ordered = anchored.Where(candidate => candidate.IsMandatory)
+            .Concat(anchored.Where(candidate => !candidate.IsMandatory))
             .ToList();
 
         var planned = new List<QueryCandidate>(ordered.Count);
@@ -667,7 +696,7 @@ public class EventQueryService
 
         if (mandatoryInvariantViolated)
         {
-            logger.LogError("[EventQuery] Query builder regression for league '{League}': {CandidateCount} candidates exceed the hard ceiling of {Ceiling}; keeping the first {KeptCount} in builder order",
+            logger.LogError("[EventQuery] Query builder regression for league '{League}': produced {SelectedCount} selected queries, exceeding the hard ceiling of {Ceiling}; keeping the first {KeptCount} in builder order",
                 leagueName ?? "(none)", selectedSoFar, HardQueryCeiling, HardQueryCeiling);
         }
 
@@ -868,11 +897,13 @@ public class EventQueryService
         new(@"^(?:UFC|Bellator|PFL|ONE|Boxing)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     /// <summary>
-    /// The form behind a query's own leading promotion token, when it has
-    /// one. A card query is spelled with the promotion the title names, which
-    /// is not always the spelling the league carries.
+    /// The form behind a fighting query's own leading promotion token, when
+    /// it has one. A card query is spelled with the promotion the title
+    /// names, which is not always the spelling the league carries. Named for
+    /// the regex it applies: wrestling has its own token set, so a wrestling
+    /// caller needs its own helper rather than this one.
     /// </summary>
-    private static LeagueNameForm? OrgTokenForm(LeagueFormSet forms, string query)
+    private static LeagueNameForm? FightingOrgTokenForm(LeagueFormSet forms, string query)
     {
         var match = FightingOrgToken.Match(query);
         return match.Success ? ResolveTokenForm(forms, match.Value) : UntokenizedForm(forms);
@@ -1075,7 +1106,7 @@ public class EventQueryService
         if (primaryQuery != null)
         {
             // Primary: "UFC 299" or "ONE Friday Fights 150"
-            queries.Add(new BuilderQuery(primaryQuery, OrgTokenForm(forms, primaryQuery), 0, IsMandatory: true));
+            queries.Add(new BuilderQuery(primaryQuery, FightingOrgTokenForm(forms, primaryQuery), 0, IsMandatory: true));
             // Supplementary: the headline matchup by surname, both orders
             if (surnameQuery != null)
                 queries.Add(new BuilderQuery(surnameQuery, UntokenizedForm(forms), 1, IsMandatory: true));
@@ -1095,7 +1126,7 @@ public class EventQueryService
             if (reversedSurnameQuery != null)
                 queries.Add(new BuilderQuery(reversedSurnameQuery, UntokenizedForm(forms), 1, IsMandatory: true));
             var normalizedTitle = NormalizeEventTitle(title);
-            queries.Add(new BuilderQuery(normalizedTitle, OrgTokenForm(forms, normalizedTitle), 2, IsMandatory: true));
+            queries.Add(new BuilderQuery(normalizedTitle, FightingOrgTokenForm(forms, normalizedTitle), 2, IsMandatory: true));
 
             // Season 10 Contender Series releases are named "UFC Tuesday
             // Night Contender Series S10W01", a different show title and a

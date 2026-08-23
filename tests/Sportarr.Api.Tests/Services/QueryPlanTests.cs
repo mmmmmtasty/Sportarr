@@ -221,7 +221,10 @@ public class QueryPlanTests
         plan.IsTruncated.Should().BeTrue();
         plan.DroppedQueries.Should().HaveCount(10);
         plan.DroppedQueries.Should().OnlyContain(query => query.DropReason == QueryDropReason.HardQueryCeilingExceeded);
-        logger.Entries.Should().Contain(entry => entry.Level == LogLevel.Error);
+        var error = logger.Entries.Should().ContainSingle(entry => entry.Level == LogLevel.Error).Subject;
+        error.Message.Should().Be(
+            "[EventQuery] Query builder regression for league 'Formula 1': produced 60 selected queries, "
+            + "exceeding the hard ceiling of 50; keeping the first 50 in builder order");
     }
 
     [Fact]
@@ -248,6 +251,23 @@ public class QueryPlanTests
             "Formula 1 2026",
             "Formule 1 2026 Round15",
             "Formule 1 2026");
+    }
+
+    [Fact]
+    public void MandatoryTemplateDuplicatingAnEarlierExpansion_KeepsItsLegacyBaselinePosition()
+    {
+        // A user template may spell an alias literally. When template 3's
+        // baseline is byte-identical to template 1's alias expansion, the
+        // promoted mandatory query must sit where template 3 emitted it -
+        // never in the earlier expansion's slot, which would push it ahead
+        // of template 2's baseline and reorder the legacy queries.
+        var evt = F1Event();
+        evt.League = new League { Name = "Formula 1", Sport = "Motorsport", UserAliases = "F1" };
+
+        var plan = _service.BuildEventQueryPlan(evt, customTemplate: "{League} A\n{League} B\nF1 A");
+
+        plan.SelectedQueries.Where(query => query.IsMandatory).Select(query => query.Text).Should()
+            .Equal("Formula1 A", "Formula1 B", "F1 A");
     }
 
     // ---- League name forms ---------------------------------------------
