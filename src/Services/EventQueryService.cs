@@ -453,9 +453,20 @@ public class EventQueryService
             };
         }
 
-        var planned = new List<QueryCandidate>(deduplicated.Count);
+        // The complete alias-free baseline comes first, selected expansions
+        // after it. Builders naturally emit an alias variant right next to
+        // the baseline query it was derived from, and letting that ordering
+        // through would move the preserved legacy strings apart. The
+        // invariant is enforced here, once, instead of being re-derived by
+        // every builder. Both partitions keep the builder's own relative
+        // order, which is where query priority actually lives.
+        var ordered = deduplicated.Where(candidate => candidate.IsMandatory)
+            .Concat(deduplicated.Where(candidate => !candidate.IsMandatory))
+            .ToList();
+
+        var planned = new List<QueryCandidate>(ordered.Count);
         var aliasBudgetUsed = 0;
-        foreach (var candidate in deduplicated)
+        foreach (var candidate in ordered)
         {
             if (candidate.IsMandatory || aliasBudgetUsed < MaxAliasExpansionPerEvent)
             {

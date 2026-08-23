@@ -115,6 +115,29 @@ public class QueryPlanTests
         evt.League!.SearchQueryTemplate.Should().BeNull();
     }
 
+    [Fact]
+    public void PureMatchupBoxingEvent_CollapsesTheDuplicateSurnameAndTitleQueries()
+    {
+        // The fighting builder emits the surname matchup, its reverse, and
+        // the normalized title. For a title that IS the matchup, the first
+        // and third are the same string - previously emitted twice, because
+        // only the template path deduplicated. The plan deduplicates every
+        // path, so this is the one place "byte-for-byte legacy output" means
+        // "modulo exact duplicates".
+        var evt = new Event
+        {
+            Title = "Usyk vs Fury",
+            Sport = "Boxing",
+            EventDate = new DateTime(2026, 5, 9),
+            League = new League { Name = "Boxing", Sport = "Boxing" },
+        };
+
+        var plan = _service.BuildEventQueryPlan(evt);
+
+        plan.SelectedQueries.Select(query => query.Text).Should().Equal("Usyk vs Fury", "Fury vs Usyk");
+        plan.SelectedQueries.Select(query => query.Text).Should().OnlyHaveUniqueItems();
+    }
+
     // ---- Deduplication and provenance ----------------------------------
 
     [Fact]
@@ -199,6 +222,32 @@ public class QueryPlanTests
         plan.DroppedQueries.Should().HaveCount(10);
         plan.DroppedQueries.Should().OnlyContain(query => query.DropReason == QueryDropReason.HardQueryCeilingExceeded);
         logger.Entries.Should().Contain(entry => entry.Level == LogLevel.Error);
+    }
+
+    [Fact]
+    public void ExpansionsEmittedBetweenBaselineQueries_AreStillAppendedAfterTheWholeBaseline()
+    {
+        // Builders naturally emit an alias variant right after the baseline
+        // query it came from. That must not push the two legacy baseline
+        // strings apart.
+        var candidates = new List<QueryCandidate>
+        {
+            Candidate("Formula 1 2026 Round15", mandatory: true),
+            Candidate("Formule 1 2026 Round15", mandatory: false,
+                form: "Formule 1", source: LeagueNameFormSource.UserAlias),
+            Candidate("Formula 1 2026", mandatory: true),
+            Candidate("Formule 1 2026", mandatory: false,
+                form: "Formule 1", source: LeagueNameFormSource.UserAlias),
+        };
+
+        var plan = EventQueryService.BuildPlan(
+            candidates, "Formula 1", [], NullLogger<EventQueryService>.Instance);
+
+        plan.SelectedQueries.Select(query => query.Text).Should().Equal(
+            "Formula 1 2026 Round15",
+            "Formula 1 2026",
+            "Formule 1 2026 Round15",
+            "Formule 1 2026");
     }
 
     // ---- League name forms ---------------------------------------------
@@ -341,6 +390,29 @@ public class QueryPlanTests
         plan.ExcludedNameForms.Select(excluded => excluded.Form.Value).Should().Contain("Fórmula 1");
         plan.ExcludedNameForms.Should()
             .OnlyContain(excluded => excluded.Reason == QueryDropReason.AliasFormLimit);
+    }
+
+    [Fact]
+    public void EverySearchedAliasForm_IsAFormLeagueAliasHelperWillAlsoMatch()
+    {
+        // LeagueQueryForms and LeagueAliasHelper are deliberately different
+        // lists (query spellings vs league identity), but they may only
+        // differ in one direction: a release found through a searched alias
+        // form must still be able to pass league-identity matching. Built-in
+        // forms are the documented exception - they are query spellings, not
+        // identities.
+        var league = AliasLeague();
+        var matching = LeagueAliasHelper.GetMatchingAliases(league);
+
+        var searched = LeagueQueryForms.Build(league, ["Formula1"]).Forms
+            .Where(form => form.Source != LeagueNameFormSource.BuiltIn)
+            .Select(form => form.Value)
+            .ToList();
+
+        searched.Should().Contain(["Formula 1", "Формула 1", "Formule 1", "F1 World Championship"]);
+        searched.Should().BeSubsetOf(matching);
+        // The abbreviation path is exercised: it is matched but never searched.
+        matching.Should().Contain("F1");
     }
 
     private sealed record LogEntry(LogLevel Level, string Message);

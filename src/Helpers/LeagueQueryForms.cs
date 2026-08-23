@@ -19,6 +19,23 @@ public sealed record LeagueQueryFormSet(
 /// what remains, matched by normalized value rather than by source, so an
 /// alias that moves between sources keeps its saved position.
 ///
+/// This is deliberately NOT the same list as
+/// <see cref="LeagueAliasHelper.GetMatchingAliases"/>, and neither derives
+/// from the other. That list answers "does this release name identify this
+/// league?" and may therefore be generous - it adds a generated abbreviation
+/// ("Formula 1" -> "F1") that would be a terrible thing to search for on its
+/// own. This one answers "what do we type into an indexer?" and must keep
+/// alias strings exactly as entered, because passing them through
+/// canonical-name recognition would collapse them back onto the same series
+/// key and make the expansion pointless.
+///
+/// The relationship that must hold is one-directional: every alias form this
+/// searches with must be a form GetMatchingAliases will match, or a release
+/// found only through that form could never pass league identity. See
+/// QueryPlanTests.EverySearchedAliasForm_IsAFormLeagueAliasHelperWillAlsoMatch.
+/// Built-in forms are the known exception - they are query spellings
+/// ("Formula1"), not league identities.
+///
 /// Alias forms are capped at <see cref="MaxAliasForms"/> after
 /// deduplication. Built-in and canonical forms are free - "Formula 1" and
 /// "Formula1" are the same league, not two of the user's alias slots.
