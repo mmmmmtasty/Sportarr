@@ -250,26 +250,61 @@ public class EventQueryService
     /// <param name="evt">The event to build queries for</param>
     /// <param name="part">Optional - IGNORED. Parts are filtered locally from results.</param>
     /// <param name="customTemplate">Optional custom search query template from league settings</param>
-    public List<string> BuildEventQueries(Event evt, string? part = null, string? customTemplate = null)
+    public List<string> BuildEventQueries(Event evt, string? part = null, string? customTemplate = null) =>
+        BuildEventQueryPlan(evt, part, customTemplate).SelectedQueries.Select(query => query.Text).ToList();
+
+    /// <summary>
+    /// The alias-expansion budget: how many league-alias variants one event
+    /// may add on top of its mandatory baseline. Ordinary and expected to be
+    /// hit - a league with three aliases and ten templates drops most of its
+    /// candidates.
+    /// </summary>
+    internal const int MaxAliasExpansionPerEvent = 8;
+
+    /// <summary>
+    /// A runaway guard, not a product decision. The largest legitimate
+    /// baseline is SearchTemplateList.MaxTemplates (10) x canonical-plus-three
+    /// team-alias slots (4) = 40, so exceeding this means a builder regressed.
+    /// </summary>
+    internal const int HardQueryCeiling = 50;
+
+    /// <summary>
+    /// The structured form of <see cref="BuildEventQueries"/>: every query
+    /// with the league-name form and provenance that produced it, what was
+    /// selected, and what was dropped and why. Provenance is recorded here
+    /// rather than reconstructed later by parsing query text.
+    /// </summary>
+    /// <param name="evt">The event to build queries for</param>
+    /// <param name="part">Optional - IGNORED. Parts are filtered locally from results.</param>
+    /// <param name="customTemplate">Optional custom search query template from league settings</param>
+    /// <param name="options">Unsaved planning inputs (settings preview); each value
+    /// falls back to the tracked League when null, so planning never mutates the entity.</param>
+    public QueryPlan BuildEventQueryPlan(Event evt, string? part = null, string? customTemplate = null,
+        QueryPlanningOptions? options = null)
     {
         var sport = evt.Sport ?? "Fighting";
-        var queries = new List<string>();
         var leagueName = evt.League?.Name;
+        var nameForms = LeagueQueryForms.Build(
+            evt.League,
+            [GetNormalizedLeagueNameForTemplate(leagueName ?? "")],
+            options);
+        var leagueForm = nameForms.Forms.FirstOrDefault(form => form.Source == LeagueNameFormSource.Canonical)
+            ?? nameForms.Forms.FirstOrDefault();
+
+        var candidates = new List<QueryCandidate>();
 
         // If custom template is provided, use it instead of default logic
         // A league may carry several templates, one per line, because release
         // groups name the same event differently. Each is asked in turn and
         // the results merge, so the first line stays the primary query.
-        var customTemplates = SearchTemplateList.Parse(customTemplate);
+        var customTemplates = SearchTemplateList.Parse(options?.SearchQueryTemplate ?? customTemplate);
         if (customTemplates.Count > 0)
         {
-            foreach (var template in customTemplates)
+            for (var templateIndex = 0; templateIndex < customTemplates.Count; templateIndex++)
             {
-                var templateQuery = BuildQueryFromTemplate(template, evt, part);
-                if (!queries.Contains(templateQuery, StringComparer.OrdinalIgnoreCase))
-                {
-                    queries.Add(templateQuery);
-                }
+                var template = customTemplates[templateIndex];
+                candidates.Add(MandatoryCandidate(BuildQueryFromTemplate(template, evt, part), QueryKind.Template,
+                    candidates.Count, leagueForm, leagueName, templateIndex, teamAliasSlot: null));
 
                 // User-defined team aliases exist so releases named in another
                 // language match - but a query built from the canonical names
@@ -277,60 +312,214 @@ public class EventQueryService
                 // place (a Cyrillic-only rutracker title has no "Portugal" to
                 // hit). Re-expand the template once per alias slot so the
                 // indexer is also asked in the alias language.
+                var teamAliasSlot = 1;
                 foreach (var (home, away) in BuildTeamAliasPairs(evt))
                 {
-                    var variant = BuildQueryFromTemplate(template, evt, part, home, away);
-                    if (!queries.Contains(variant, StringComparer.OrdinalIgnoreCase))
-                    {
-                        queries.Add(variant);
-                    }
+                    candidates.Add(MandatoryCandidate(BuildQueryFromTemplate(template, evt, part, home, away),
+                        QueryKind.Template, candidates.Count, leagueForm, leagueName, templateIndex, teamAliasSlot));
+                    teamAliasSlot++;
                 }
             }
 
+            var templatePlan = BuildPlan(candidates, leagueName, nameForms.ExcludedForms, _logger);
+
             _logger.LogInformation("[EventQuery] Using {TemplateCount} custom template(s) for '{EventTitle}': primary '{Query}' ({Count} query/queries incl. team aliases)",
-                customTemplates.Count, evt.Title, queries.FirstOrDefault(), queries.Count);
-            return queries;
+                customTemplates.Count, evt.Title, templatePlan.SelectedQueries.FirstOrDefault()?.Text,
+                templatePlan.SelectedQueries.Count);
+            return templatePlan;
         }
 
         _logger.LogDebug("[EventQuery] Building queries for '{Title}' | Sport: '{Sport}' | League: '{League}'",
             evt.Title, sport, leagueName ?? "(none)");
 
+        var queries = new List<string>();
         string queryType;
+        QueryKind queryKind;
 
         // Check if this is a motorsport event (checks sport, league, AND event title)
         if (IsMotorsport(sport, leagueName, evt.Title))
         {
             BuildMotorsportQueries(evt, leagueName, queries);
             queryType = "Motorsport";
+            queryKind = QueryKind.Motorsport;
         }
         else if (IsWrestling(sport, leagueName))
         {
             BuildWrestlingQueries(evt, leagueName, queries);
             queryType = "Wrestling";
+            queryKind = QueryKind.Wrestling;
         }
         else if (IsFightingSport(sport, leagueName))
         {
             BuildFightingQueries(evt, leagueName, queries);
             queryType = "Fighting";
+            queryKind = QueryKind.Fighting;
         }
         else if (IsTeamSport(sport, leagueName))
         {
             BuildTeamSportQueries(evt, leagueName, queries);
             queryType = "TeamSport";
+            queryKind = QueryKind.TeamSport;
         }
         else
         {
             // Fallback: use normalized event title
             queries.Add(NormalizeEventTitle(evt.Title));
             queryType = "Fallback";
+            queryKind = QueryKind.Fallback;
             _logger.LogWarning("[EventQuery] Using fallback query for '{Title}' - Sport '{Sport}' / League '{League}' not recognized",
                 evt.Title, sport, leagueName ?? "(none)");
         }
 
-        _logger.LogInformation("[EventQuery] Built {Count} {QueryType} queries for '{EventTitle}': {Queries}",
-            queries.Count, queryType, evt.Title, string.Join(" | ", queries));
+        // Everything the default builders produce today is the alias-free
+        // baseline, so all of it is mandatory: adding league aliases later
+        // must never be able to remove an existing query.
+        candidates.AddRange(queries.Select((text, index) =>
+            MandatoryCandidate(text, queryKind, index, leagueForm, leagueName, templateIndex: null, teamAliasSlot: null)));
 
-        return queries;
+        var plan = BuildPlan(candidates, leagueName, nameForms.ExcludedForms, _logger);
+
+        _logger.LogInformation("[EventQuery] Built {Count} {QueryType} queries for '{EventTitle}': {Queries}",
+            plan.SelectedQueries.Count, queryType, evt.Title,
+            string.Join(" | ", plan.SelectedQueries.Select(query => query.Text)));
+
+        return plan;
+    }
+
+    /// <summary>
+    /// A baseline query: alias-free, therefore mandatory and never counted
+    /// against the alias-expansion budget.
+    /// </summary>
+    private static QueryCandidate MandatoryCandidate(string text, QueryKind kind, int specificityRank,
+        LeagueNameForm? leagueForm, string? leagueName, int? templateIndex, int? teamAliasSlot) =>
+        new(
+            Text: text,
+            LeagueNameForm: leagueForm?.Value ?? leagueName ?? "",
+            FormSource: leagueForm?.Source ?? LeagueNameFormSource.Canonical,
+            Kind: kind,
+            SpecificityRank: specificityRank,
+            AliasOrderIndex: leagueForm?.OrderIndex ?? 0,
+            TemplateIndex: templateIndex,
+            TeamAliasSlot: teamAliasSlot,
+            IsMandatory: true,
+            IsSelected: false,
+            DropReason: null,
+            ContributingForms: leagueForm is null ? [] : [leagueForm]);
+
+    /// <summary>
+    /// Deduplicate, then select: every mandatory query unconditionally, then
+    /// alias expansions up to <see cref="MaxAliasExpansionPerEvent"/> in the
+    /// order the builder produced them (the builder owns priority; this only
+    /// enforces the budget). Candidate order is otherwise preserved.
+    /// </summary>
+    internal static QueryPlan BuildPlan(
+        IReadOnlyList<QueryCandidate> candidates,
+        string? leagueName,
+        IReadOnlyList<ExcludedLeagueNameForm> excludedNameForms,
+        ILogger logger)
+    {
+        // Case-insensitive deduplication happens before budgeting. When the
+        // same text has several provenances the mandatory one wins, and the
+        // other contributing forms are kept for preview diagnostics.
+        var deduplicated = new List<QueryCandidate>();
+        var positions = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var candidate in candidates)
+        {
+            if (!positions.TryGetValue(candidate.Text, out var position))
+            {
+                positions[candidate.Text] = deduplicated.Count;
+                deduplicated.Add(candidate);
+                continue;
+            }
+
+            var kept = deduplicated[position];
+            var winner = !kept.IsMandatory && candidate.IsMandatory ? candidate : kept;
+            var loser = ReferenceEquals(winner, kept) ? candidate : kept;
+
+            var contributing = winner.ContributingForms.ToList();
+            foreach (var form in loser.ContributingForms)
+            {
+                if (!contributing.Any(existing =>
+                        string.Equals(existing.Value, form.Value, StringComparison.OrdinalIgnoreCase)))
+                {
+                    contributing.Add(form);
+                }
+            }
+
+            deduplicated[position] = winner with
+            {
+                IsMandatory = kept.IsMandatory || candidate.IsMandatory,
+                ContributingForms = contributing,
+            };
+        }
+
+        var planned = new List<QueryCandidate>(deduplicated.Count);
+        var aliasBudgetUsed = 0;
+        foreach (var candidate in deduplicated)
+        {
+            if (candidate.IsMandatory || aliasBudgetUsed < MaxAliasExpansionPerEvent)
+            {
+                if (!candidate.IsMandatory)
+                {
+                    aliasBudgetUsed++;
+                }
+                planned.Add(candidate with { IsSelected = true, DropReason = null });
+                continue;
+            }
+
+            planned.Add(candidate with { IsSelected = false, DropReason = QueryDropReason.AliasBudgetExceeded });
+        }
+
+        var budgetDropped = planned.Count(candidate => !candidate.IsSelected);
+        if (budgetDropped > 0)
+        {
+            logger.LogWarning("[EventQuery] Alias expansion truncated for league '{League}': {SelectedCount} queries selected, {DroppedCount} dropped",
+                leagueName ?? "(none)", planned.Count - budgetDropped, budgetDropped);
+        }
+
+        // The hard ceiling applies only after ordinary selection. Reaching it
+        // means a builder regressed, so it keeps the first queries in builder
+        // order and says so loudly rather than silently trimming.
+        var mandatoryInvariantViolated = false;
+        var selectedSoFar = 0;
+        for (var i = 0; i < planned.Count; i++)
+        {
+            if (!planned[i].IsSelected)
+            {
+                continue;
+            }
+
+            selectedSoFar++;
+            if (selectedSoFar > HardQueryCeiling)
+            {
+                planned[i] = planned[i] with
+                {
+                    IsSelected = false,
+                    DropReason = QueryDropReason.HardQueryCeilingExceeded,
+                };
+                mandatoryInvariantViolated = true;
+            }
+        }
+
+        if (mandatoryInvariantViolated)
+        {
+            logger.LogError("[EventQuery] Query builder regression for league '{League}': {CandidateCount} candidates exceed the hard ceiling of {Ceiling}; keeping the first {KeptCount} in builder order",
+                leagueName ?? "(none)", selectedSoFar, HardQueryCeiling, HardQueryCeiling);
+        }
+
+        var selected = planned.Where(candidate => candidate.IsSelected).ToList();
+        var dropped = planned.Where(candidate => !candidate.IsSelected).ToList();
+
+        return new QueryPlan(
+            Candidates: planned,
+            SelectedQueries: selected,
+            DroppedQueries: dropped,
+            ExcludedNameForms: excludedNameForms,
+            AliasBudgetUsed: selected.Count(candidate => !candidate.IsMandatory),
+            AliasBudgetLimit: MaxAliasExpansionPerEvent,
+            HardQueryCeiling: HardQueryCeiling,
+            IsTruncated: dropped.Count > 0,
+            MandatoryInvariantViolated: mandatoryInvariantViolated);
     }
 
     /// <summary>
