@@ -499,15 +499,31 @@ public class EventQueryService
         int? TeamAliasSlot = null);
 
     /// <summary>
-    /// The recorded name form behind a built-in query spelling: the matching
-    /// planned form when the league has one, otherwise the spelling itself as
-    /// a built-in form. Built-in spellings ("Formula1") are query text rather
-    /// than league identities, so they may legitimately be absent from the
-    /// planned form list.
+    /// The recorded name form behind a league token a builder interpolated:
+    /// the matching planned form when the league has one, otherwise the token
+    /// itself as a built-in spelling. Query spellings ("Formula1", "SBK") are
+    /// query text rather than league identities, so they may legitimately be
+    /// absent from the planned form list.
+    ///
+    /// An unmatched spelling sorts to the END of the saved order
+    /// (<c>forms.All.Count</c>), never the front. A form the user never
+    /// ordered must not outrank the ones they did: giving "SBK" index 0 would
+    /// hoist every SBK query ahead of its WSBK counterpart at every
+    /// specificity rank the moment anything was dragged above "WSBK".
     /// </summary>
-    private static LeagueNameForm MatchBuiltInForm(LeagueFormSet forms, string value) =>
+    private static LeagueNameForm ResolveTokenForm(LeagueFormSet forms, string value) =>
         forms.All.FirstOrDefault(form => string.Equals(form.Value, value, StringComparison.OrdinalIgnoreCase))
-            ?? new LeagueNameForm(value, LeagueNameFormSource.BuiltIn, 0, [LeagueNameFormSource.BuiltIn]);
+            ?? new LeagueNameForm(value, LeagueNameFormSource.BuiltIn, forms.All.Count, [LeagueNameFormSource.BuiltIn]);
+
+    /// <summary>
+    /// The form to record for a query that interpolates no league token at
+    /// all - an event-title or surname-matchup query. The canonical league
+    /// name is the honest answer: the league identifies the query, but no
+    /// spelling of it was used to build the text. Never a built-in spelling,
+    /// which would name a string that appears nowhere in the query.
+    /// </summary>
+    private static LeagueNameForm? UntokenizedForm(LeagueFormSet forms) =>
+        forms.All.FirstOrDefault(form => form.Source == LeagueNameFormSource.Canonical) ?? forms.Baseline;
 
     /// <summary>
     /// The execution order of the planned candidates.
@@ -800,7 +816,7 @@ public class EventQueryService
         // seriesKey and the expansion would produce nothing new - "Формула 1"
         // has to reach the indexer as "Формула 1", not "Формула1".
         var prefixSources = searchPrefixes
-            .Select(prefix => (Prefix: prefix, Form: MatchBuiltInForm(forms, prefix), Mandatory: true))
+            .Select(prefix => (Prefix: prefix, Form: ResolveTokenForm(forms, prefix), Mandatory: true))
             .Concat(forms.Aliases.Select(alias => (Prefix: alias.Value, Form: alias, Mandatory: false)));
 
         foreach (var (prefix, form, mandatory) in prefixSources)
@@ -850,6 +866,17 @@ public class EventQueryService
 
     private static readonly Regex FightingOrgToken =
         new(@"^(?:UFC|Bellator|PFL|ONE|Boxing)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// The form behind a query's own leading promotion token, when it has
+    /// one. A card query is spelled with the promotion the title names, which
+    /// is not always the spelling the league carries.
+    /// </summary>
+    private static LeagueNameForm? OrgTokenForm(LeagueFormSet forms, string query)
+    {
+        var match = FightingOrgToken.Match(query);
+        return match.Success ? ResolveTokenForm(forms, match.Value) : UntokenizedForm(forms);
+    }
 
     /// <summary>
     /// Add one alias variant per baseline query that leads with a recognized
@@ -904,6 +931,12 @@ public class EventQueryService
             org = "AEW";
         }
 
+        // The promotion token is what actually goes into the query, and it is
+        // read from the title as often as from the league name, so the form
+        // recorded is the one for that token - not whatever spelling the
+        // league happens to carry.
+        var orgForm = ResolveTokenForm(forms, org);
+
         // Known weekly shows
         var weeklyShows = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
         {
@@ -939,10 +972,10 @@ public class EventQueryService
             // UTC-rolled-over 2026-01-01 that nothing publishes.
             var date = evt.BroadcastDate ?? evt.EventDate.Date;
             queries.Add(new BuilderQuery($"{org} {matchedShow} {date.Year} {date.Month:D2} {date.Day:D2}",
-                forms.Baseline, 0, IsMandatory: true));
+                orgForm, 0, IsMandatory: true));
             // Fallback: "WWE RAW 2026 03" (month-level)
             queries.Add(new BuilderQuery($"{org} {matchedShow} {date.Year} {date.Month:D2}",
-                forms.Baseline, 1, IsMandatory: true));
+                orgForm, 1, IsMandatory: true));
 
             _logger.LogDebug("[EventQuery] Wrestling weekly show: {Org} {Show} on {Date:yyyy-MM-dd}",
                 org, matchedShow, date);
@@ -958,13 +991,13 @@ public class EventQueryService
             {
                 var brandingYear = (evt.BroadcastDate ?? evt.EventDate).Year;
                 // Primary: "WWE WrestleMania 2026"
-                queries.Add(new BuilderQuery($"{org} {eventName} {brandingYear}", forms.Baseline, 0, IsMandatory: true));
+                queries.Add(new BuilderQuery($"{org} {eventName} {brandingYear}", orgForm, 0, IsMandatory: true));
                 // Fallback: "WWE WrestleMania"
-                queries.Add(new BuilderQuery($"{org} {eventName}", forms.Baseline, 1, IsMandatory: true));
+                queries.Add(new BuilderQuery($"{org} {eventName}", orgForm, 1, IsMandatory: true));
             }
             else
             {
-                queries.Add(new BuilderQuery(NormalizeEventTitle(title), forms.Baseline, 0, IsMandatory: true));
+                queries.Add(new BuilderQuery(NormalizeEventTitle(title), UntokenizedForm(forms), 0, IsMandatory: true));
             }
 
             _logger.LogDebug("[EventQuery] Wrestling PPV/special: {Org} {EventName}", org, eventName);
@@ -1042,15 +1075,15 @@ public class EventQueryService
         if (primaryQuery != null)
         {
             // Primary: "UFC 299" or "ONE Friday Fights 150"
-            queries.Add(new BuilderQuery(primaryQuery, forms.Baseline, 0, IsMandatory: true));
+            queries.Add(new BuilderQuery(primaryQuery, OrgTokenForm(forms, primaryQuery), 0, IsMandatory: true));
             // Supplementary: the headline matchup by surname, both orders
             if (surnameQuery != null)
-                queries.Add(new BuilderQuery(surnameQuery, forms.Baseline, 1, IsMandatory: true));
+                queries.Add(new BuilderQuery(surnameQuery, UntokenizedForm(forms), 1, IsMandatory: true));
             if (reversedSurnameQuery != null)
-                queries.Add(new BuilderQuery(reversedSurnameQuery, forms.Baseline, 2, IsMandatory: true));
+                queries.Add(new BuilderQuery(reversedSurnameQuery, UntokenizedForm(forms), 2, IsMandatory: true));
             // Fallback: "UFC 2026"
             if (!string.IsNullOrEmpty(org))
-                queries.Add(new BuilderQuery($"{org} {brandingYear}", forms.Baseline, 3, IsMandatory: true));
+                queries.Add(new BuilderQuery($"{org} {brandingYear}", ResolveTokenForm(forms, org), 3, IsMandatory: true));
         }
         else
         {
@@ -1058,10 +1091,11 @@ public class EventQueryService
             // query is the most specific form that matches release naming, so
             // it leads; the normalized full title stays as a fallback.
             if (surnameQuery != null)
-                queries.Add(new BuilderQuery(surnameQuery, forms.Baseline, 0, IsMandatory: true));
+                queries.Add(new BuilderQuery(surnameQuery, UntokenizedForm(forms), 0, IsMandatory: true));
             if (reversedSurnameQuery != null)
-                queries.Add(new BuilderQuery(reversedSurnameQuery, forms.Baseline, 1, IsMandatory: true));
-            queries.Add(new BuilderQuery(NormalizeEventTitle(title), forms.Baseline, 2, IsMandatory: true));
+                queries.Add(new BuilderQuery(reversedSurnameQuery, UntokenizedForm(forms), 1, IsMandatory: true));
+            var normalizedTitle = NormalizeEventTitle(title);
+            queries.Add(new BuilderQuery(normalizedTitle, OrgTokenForm(forms, normalizedTitle), 2, IsMandatory: true));
 
             // Season 10 Contender Series releases are named "UFC Tuesday
             // Night Contender Series S10W01", a different show title and a
@@ -1075,13 +1109,13 @@ public class EventQueryService
                 var s = int.Parse(dwcs.Groups[1].Value);
                 var e = int.Parse(dwcs.Groups[3].Value);
                 queries.Add(new BuilderQuery($"UFC Tuesday Night Contender Series S{s}W{e:D2}",
-                    forms.Baseline, 3, IsMandatory: true));
+                    ResolveTokenForm(forms, "UFC"), 3, IsMandatory: true));
                 if (dwcs.Groups[2].Value.StartsWith("w", StringComparison.OrdinalIgnoreCase))
                 {
                     // Some groups keep the classic show title with the week
                     // numbering, so that pairing gets its own query too.
                     queries.Add(new BuilderQuery($"Dana Whites Contender Series S{s}W{e:D2}",
-                        forms.Baseline, 4, IsMandatory: true));
+                        UntokenizedForm(forms), 4, IsMandatory: true));
                 }
             }
 
@@ -1089,7 +1123,7 @@ public class EventQueryService
             if (orgMatch.Success)
             {
                 queries.Add(new BuilderQuery($"{orgMatch.Value.ToUpperInvariant()} {brandingYear}",
-                    forms.Baseline, 5, IsMandatory: true));
+                    ResolveTokenForm(forms, orgMatch.Value.ToUpperInvariant()), 5, IsMandatory: true));
             }
         }
 
@@ -1100,10 +1134,6 @@ public class EventQueryService
     }
 
     /// <summary>
-    /// Build team sport queries (NFL, NBA, NHL, MLB, etc.).
-    /// Primary: league + year + month. Fallback: league + year.
-    /// </summary>
-    /// <summary>
     /// Team-sport specificity in the order the builder emits it: the most
     /// specific league query (year plus month, or the event title), its
     /// second form (the broad season query, or the reversed title), then the
@@ -1113,15 +1143,31 @@ public class EventQueryService
     private const int TeamSportSecondaryRank = 1;
     private const int TeamSportTeamPairRank = 2;
 
+    /// <summary>
+    /// Build team sport queries (NFL, NBA, NHL, MLB, etc.).
+    /// Primary: league + year + month. Fallback: league + year.
+    /// </summary>
     private void BuildTeamSportQueries(Event evt, string? leagueName, LeagueFormSet forms, List<BuilderQuery> queries)
     {
         var leaguePrefix = GetTeamSportLeaguePrefix(leagueName);
         var queryDate = evt.BroadcastDate ?? evt.EventDate.Date;
         var year = queryDate.Year;
 
+        // Record the form for the token this branch actually interpolates -
+        // the mapped prefix ("NFL"), or the RAW league name the unmapped
+        // branch hands to AddTeamAliasQueries ("Premiership Rugby"). Stamping
+        // one baseline form on everything would attribute
+        // "Premiership Rugby 2026 Bath Rugby Saracens" to the space-stripped
+        // built-in spelling "PremiershipRugby", which appears nowhere in the
+        // query and was never used to build it.
+        var leagueToken = string.IsNullOrEmpty(leaguePrefix) ? leagueName : leaguePrefix;
+        var tokenForm = string.IsNullOrWhiteSpace(leagueToken) ? null : ResolveTokenForm(forms, leagueToken);
+        // Event-title queries carry no league token at all.
+        var titleForm = UntokenizedForm(forms);
+
         if (string.IsNullOrEmpty(leaguePrefix))
         {
-            queries.Add(new BuilderQuery(NormalizeEventTitle(evt.Title), forms.Baseline, TeamSportPrimaryRank, IsMandatory: true));
+            queries.Add(new BuilderQuery(NormalizeEventTitle(evt.Title), titleForm, TeamSportPrimaryRank, IsMandatory: true));
 
             // Some indexers (college sports rip groups especially) title releases in
             // broadcast order rather than the schedule's home/away designation, e.g.
@@ -1153,10 +1199,10 @@ public class EventQueryService
 
             if (reversed != null && !ContainsQuery(queries, reversed))
             {
-                queries.Add(new BuilderQuery(reversed, forms.Baseline, TeamSportSecondaryRank, IsMandatory: true));
+                queries.Add(new BuilderQuery(reversed, titleForm, TeamSportSecondaryRank, IsMandatory: true));
             }
 
-            AddTeamAliasQueries(evt, leagueName, year, forms, queries);
+            AddTeamAliasQueries(evt, leagueName, year, tokenForm, queries);
             AddLeagueAliasTeamQueries(evt, year, forms, queries);
             return;
         }
@@ -1166,10 +1212,10 @@ public class EventQueryService
         var month = queryDate.Month;
 
         // Primary: "NFL 2025 12" (year + month)
-        queries.Add(new BuilderQuery($"{leaguePrefix} {year} {month:D2}", forms.Baseline, TeamSportPrimaryRank, IsMandatory: true));
+        queries.Add(new BuilderQuery($"{leaguePrefix} {year} {month:D2}", tokenForm, TeamSportPrimaryRank, IsMandatory: true));
         // Fallback: "NFL 2025" (year only)
-        queries.Add(new BuilderQuery($"{leaguePrefix} {year}", forms.Baseline, TeamSportSecondaryRank, IsMandatory: true));
-        AddTeamAliasQueries(evt, leaguePrefix, year, forms, queries);
+        queries.Add(new BuilderQuery($"{leaguePrefix} {year}", tokenForm, TeamSportSecondaryRank, IsMandatory: true));
+        AddTeamAliasQueries(evt, leaguePrefix, year, tokenForm, queries);
         AddLeagueAliasTeamQueries(evt, year, forms, queries);
     }
 
@@ -1229,7 +1275,7 @@ public class EventQueryService
     private void BuildFallbackQueries(Event evt, LeagueFormSet forms, List<BuilderQuery> queries)
     {
         var title = NormalizeEventTitle(evt.Title);
-        queries.Add(new BuilderQuery(title, forms.Baseline, 0, IsMandatory: true));
+        queries.Add(new BuilderQuery(title, UntokenizedForm(forms), 0, IsMandatory: true));
 
         var year = (evt.BroadcastDate ?? evt.EventDate).Year;
         foreach (var alias in forms.Aliases)
@@ -1248,7 +1294,7 @@ public class EventQueryService
     /// "FIFA World Cup 2026 Португалия Испания".
     /// </summary>
     private void AddTeamAliasQueries(
-        Event evt, string? leagueToken, int year, LeagueFormSet forms, List<BuilderQuery> queries)
+        Event evt, string? leagueToken, int year, LeagueNameForm? tokenForm, List<BuilderQuery> queries)
     {
         var slot = 1;
         foreach (var (home, away) in BuildTeamAliasPairs(evt))
@@ -1258,7 +1304,7 @@ public class EventQueryService
                 : $"{leagueToken} {year} {home} {away}";
             if (!ContainsQuery(queries, query))
             {
-                queries.Add(new BuilderQuery(query, forms.Baseline, TeamSportTeamPairRank, IsMandatory: true, TeamAliasSlot: slot));
+                queries.Add(new BuilderQuery(query, tokenForm, TeamSportTeamPairRank, IsMandatory: true, TeamAliasSlot: slot));
             }
             slot++;
         }

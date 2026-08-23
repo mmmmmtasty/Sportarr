@@ -428,4 +428,116 @@ public class EventQueryServiceLeagueAliasTests
             "a Лига 2026",
             "b Лига 2026");
     }
+
+    // ---- Provenance: the form each builder actually interpolated ---------
+
+    [Fact]
+    public void MappedTeamSport_RecordsThePrefixFormItInterpolated()
+    {
+        var plan = _service.BuildEventQueryPlan(NflEvent());
+
+        var primary = plan.SelectedQueries.Single(query => query.Text == "NFL 2026 09");
+        primary.LeagueNameForm.Should().Be("NFL");
+        primary.FormSource.Should().Be(LeagueNameFormSource.BuiltIn);
+    }
+
+    private static Event PremiershipRugbyEventWithTeamAliases(string? userAliases = null) => new()
+    {
+        Title = "Bath vs Saracens",
+        Sport = "Rugby",
+        EventDate = new DateTime(2026, 3, 14),
+        League = new League { Name = "Premiership Rugby", Sport = "Rugby", UserAliases = userAliases },
+        HomeTeam = new Team { Name = "Bath", UserAliases = "Bath Rugby" },
+        AwayTeam = new Team { Name = "Saracens" },
+        HomeTeamName = "Bath",
+        AwayTeamName = "Saracens",
+    };
+
+    [Fact]
+    public void UnmappedTeamSport_RecordsTheRawLeagueNameItInterpolated_NotTheBuiltInSpelling()
+    {
+        // The unmapped branch interpolates the RAW league name, so recording
+        // the space-stripped built-in spelling would name a string that
+        // appears nowhere in the query and was never used to build it.
+        var plan = _service.BuildEventQueryPlan(PremiershipRugbyEventWithTeamAliases());
+
+        var teamAliasQuery = plan.SelectedQueries
+            .Single(query => query.Text == "Premiership Rugby 2026 Bath Rugby Saracens");
+        teamAliasQuery.LeagueNameForm.Should().Be("Premiership Rugby");
+        teamAliasQuery.FormSource.Should().Be(LeagueNameFormSource.Canonical);
+
+        // The event-title queries carry no league token at all, so they must
+        // not claim a built-in spelling either.
+        var title = plan.SelectedQueries.Single(query => query.Text == "Bath vs Saracens");
+        title.LeagueNameForm.Should().Be("Premiership Rugby");
+        title.FormSource.Should().Be(LeagueNameFormSource.Canonical);
+    }
+
+    [Fact]
+    public void Wrestling_RecordsThePromotionTokenItInterpolated()
+    {
+        var plan = _service.BuildEventQueryPlan(RawEvent());
+
+        var primary = plan.SelectedQueries.Single(query => query.Text == "WWE Raw 2026 03 02");
+        primary.LeagueNameForm.Should().Be("WWE");
+        primary.FormSource.Should().Be(LeagueNameFormSource.BuiltIn);
+    }
+
+    [Fact]
+    public void GenericFallback_RecordsTheCanonicalNameForATitleOnlyQuery()
+    {
+        var plan = _service.BuildEventQueryPlan(CyclingEvent());
+
+        var only = plan.SelectedQueries.Single();
+        only.Text.Should().Be("Paris Roubaix");
+        only.LeagueNameForm.Should().Be("UCI World Tour");
+        only.FormSource.Should().Be(LeagueNameFormSource.Canonical);
+    }
+
+    // ---- Unmatched built-in spellings sort last, never first -------------
+
+    private static Event WsbkEvent(string? userAliases = null) => new()
+    {
+        Title = "Superbike Race",
+        Sport = "Motorsport",
+        Round = "3",
+        EventDate = new DateTime(2026, 4, 12),
+        League = new League { Name = "WSBK", Sport = "Motorsport", UserAliases = userAliases },
+    };
+
+    [Fact]
+    public void Wsbk_NullOrder_KeepsTheLegacyPrefixOrderByteForByte()
+    {
+        Texts(_service.BuildEventQueryPlan(WsbkEvent())).Should().Equal(
+            "WSBK 2026 Round03",
+            "WSBK 2026",
+            "SBK 2026 Round03",
+            "SBK 2026");
+    }
+
+    [Fact]
+    public void SavedOrder_DoesNotHoistABuiltInSpellingTheLeagueHasNoFormFor()
+    {
+        // "SBK" is a second query spelling of the WSBK series, not a league
+        // name form, so it never appears in the saved order. It must sort
+        // AFTER the forms the user did order - sorting an unknown form to the
+        // front would hoist every SBK query ahead of its WSBK counterpart at
+        // every specificity rank, an ordering nobody asked for.
+        var evt = WsbkEvent("Superbike World Championship");
+        evt.League!.AliasSearchOrder =
+        [
+            new LeagueAliasOrderEntry { Source = LeagueNameFormSource.UserAlias, Value = "Superbike World Championship" },
+            new LeagueAliasOrderEntry { Source = LeagueNameFormSource.BuiltIn, Value = "WSBK" },
+        ];
+
+        var plan = _service.BuildEventQueryPlan(evt);
+
+        Texts(plan).Should().Equal(
+            "WSBK 2026 Round03",
+            "SBK 2026 Round03",
+            "WSBK 2026",
+            "SBK 2026",
+            "Superbike World Championship 2026 Round03",
+            "Superbike World Championship 2026");
+    }
 }
