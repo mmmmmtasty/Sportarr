@@ -19,7 +19,7 @@ This is part of a four-PR chain. Each branch builds on the previous one; please 
 
 | | PR | Branch | Contents |
 |---|---|---|---|
-| 1 | #___ | `feat/league-alias-foundations` | Alias parsing, league alias persistence, unified league identity, token catalog |
+| 1 | #255 | `feat/league-alias-foundations` | Alias parsing, league alias persistence, unified league identity, token catalog |
 | 2 | #___ | `feat/league-alias-query-plan` | Structured query plan, bounded league-alias expansion |
 | 3 | #___ | `feat/per-indexer-search-cache` | Per-indexer result caching, full plan execution, opt-in strong-match stop |
 | 4 | #___ | `feat/advanced-league-search-settings` | Advanced Search Settings UI, structured preview, docs |
@@ -89,7 +89,7 @@ The identity enumeration adoption in `ReleaseMatchingService` and `LibraryImport
 ```markdown
 <!-- stack map here, marking PR 2 -->
 
-**Builds on #___ (PR 1).** Review that first; this branch contains its commits.
+**Builds on #255 (PR 1).** Review that first; this branch contains its commits.
 
 ## Why
 
