@@ -691,7 +691,8 @@ public enum PendingImportStatus
     Pending,        // Awaiting user action
     Importing,      // Currently being imported
     Completed,      // Successfully imported
-    Rejected        // User rejected this import
+    Rejected,       // User rejected this import
+    Ignored         // User stopped processing this client job; can be resumed
 }
 
 /// <summary>

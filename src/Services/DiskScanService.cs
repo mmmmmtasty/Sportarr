@@ -722,11 +722,11 @@ public class DiskScanService : BackgroundService, IAsyncDisposable
         // Exclude paths the user is currently being asked about (open PendingImport
         // rows) so we don't re-add a duplicate row each scan while it's awaiting
         // resolution.
-        var pendingPaths = new HashSet<string>(
-            await db.PendingImports
-                .Select(pi => pi.FilePath)
-                .ToListAsync(cancellationToken),
-            StringComparer.OrdinalIgnoreCase);
+        var pendingRecords = await db.PendingImports
+            .Select(pi => new { pi.FilePath, pi.Status }).ToListAsync(cancellationToken);
+        var pendingPaths = pendingRecords.Select(p => p.FilePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var ignoredPaths = pendingRecords.Where(p => p.Status == PendingImportStatus.Ignored)
+            .Select(p => p.FilePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
         // Keep confidence-100 choices because the source is not recorded.
         var refreshablePendingByPath = (await db.PendingImports
                 .Where(pi => pi.DownloadClientId == null && pi.Status == PendingImportStatus.Pending &&
@@ -807,6 +807,8 @@ public class DiskScanService : BackgroundService, IAsyncDisposable
                     if (trackedPaths.Contains(filePath) ||
                         blocklistedPaths.Contains(filePath) || activeRecordingPaths.Contains(filePath))
                         continue;
+
+                    if (ignoredPaths.Count > 0 && LibraryPathFilter.FileAndAncestors(filePath).Any(ignoredPaths.Contains)) continue;
 
                     if (pendingPaths.Contains(filePath))
                     {

@@ -198,6 +198,7 @@ app.MapDelete("/api/queue/{id:int}", async (
     {
         404 => Results.NotFound(),
         400 => Results.BadRequest(result.ErrorMessage),
+        409 => Results.Conflict(new { error = result.ErrorMessage }),
         // The row went but the client would not confirm the deletion. Say so
         // rather than returning a bare success for a download still running.
         200 => Results.Ok(new { warning = result.ErrorMessage }),
@@ -297,7 +298,7 @@ app.MapPost("/api/queue/{id:int}/import", async (int id, SportarrDbContext db, F
 app.MapManualQueueImportEndpoint();
 
 // API: Queue Operations - Retry Import (for failed imports)
-app.MapPost("/api/queue/{id:int}/retry", async (int id, SportarrDbContext db, FileImportService fileImportService, ILogger<Program> logger, IServiceProvider services, DownloadClientService downloadClientService) =>
+app.MapPost("/api/queue/{id:int}/retry", async (int id, SportarrDbContext db, FileImportService fileImportService, ILogger<Program> logger, IServiceProvider services, DownloadClientService downloadClientService, [FromServices] DownloadOwnershipCoordinator coordinator) =>
 {
     var item = await db.DownloadQueue
         .Include(dq => dq.Event)
@@ -305,6 +306,12 @@ app.MapPost("/api/queue/{id:int}/retry", async (int id, SportarrDbContext db, Fi
         .FirstOrDefaultAsync(dq => dq.Id == id);
 
     if (item is null) return Results.NotFound(new { error = "Queue item not found" });
+
+    using var decision = coordinator.TryEnterExternalDecision();
+    if (decision == null)
+        return Results.Conflict(new { error = "A download is being processed. Try again when processing finishes." });
+    await db.Entry(item).ReloadAsync();
+    if (db.Entry(item).State == EntityState.Detached) return Results.NotFound();
 
     var heldPackMember = PackImportBoundary.IsHeld(item);
     if (item.Status != DownloadStatus.Failed && !heldPackMember)
@@ -362,6 +369,32 @@ app.MapPost("/api/queue/{id:int}/retry", async (int id, SportarrDbContext db, Fi
 });
 
 // API: Pending Imports (Manual Import for External Downloads)
+app.MapGet("/api/queue/ignored", async (SportarrDbContext db) => Results.Ok(
+    await db.PendingImports.AsNoTracking()
+        .Where(p => p.Status == PendingImportStatus.Ignored)
+        .OrderByDescending(p => p.ResolvedAt)
+        .Select(p => new { p.Id, p.Title, ClientName = p.DownloadClient == null ? null : p.DownloadClient.Name, IgnoredAt = p.ResolvedAt })
+        .ToListAsync()));
+
+app.MapPost("/api/queue/ignored/clear", async (QueueRemovalService service) =>
+{
+    var result = await service.ResumeIgnoredAsync();
+    return result.StatusCode == 409
+        ? Results.Conflict(new { error = result.ErrorMessage })
+        : Results.NoContent();
+});
+
+app.MapPost("/api/queue/ignored/{id:int}/resume", async (int id, QueueRemovalService service) =>
+{
+    var result = await service.ResumeIgnoredAsync(id);
+    return result.StatusCode switch
+    {
+        404 => Results.NotFound(),
+        409 => Results.Conflict(new { error = result.ErrorMessage }),
+        _ => Results.NoContent()
+    };
+});
+
 app.MapGet("/api/pending-imports", async (SportarrDbContext db, ConfigService configService) =>
 {
     var config = await configService.GetConfigAsync();
@@ -449,8 +482,12 @@ app.MapPost("/api/pending-imports/{id:int}/accept", async (
     LibraryImportService libraryImportService,
     ConfigService configService,
     EventPartDetector partDetector,
-    CustomFormatService customFormatService) =>
+    CustomFormatService customFormatService,
+    [FromServices] DownloadOwnershipCoordinator coordinator) =>
 {
+    using var decision = coordinator.TryEnterExternalDecision();
+    if (decision == null)
+        return Results.Conflict(new { error = "A download is being processed. Try again when processing finishes." });
     // Accept a pending import and perform the actual import.
     // Body is optional: when present, may carry { metadataOverrides: { quality, source,
     // codec, releaseGroup, originalTitle, languages, indexerFlags, partName, partNumber } }
@@ -503,6 +540,8 @@ app.MapPost("/api/pending-imports/{id:int}/accept", async (
     if (import is null) return Results.NotFound();
     if (import.SuggestedEventId is null)
         return Results.BadRequest(new { error = "No event selected for import" });
+    if (import.Status == PendingImportStatus.Ignored)
+        return Results.Conflict(new { error = "Resume processing this ignored download before importing it." });
 
     try
     {

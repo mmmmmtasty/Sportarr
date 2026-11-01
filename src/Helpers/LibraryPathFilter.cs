@@ -14,6 +14,16 @@ namespace Sportarr.Api.Helpers;
 /// </summary>
 public static class LibraryPathFilter
 {
+    /// <summary>Candidate paths for an ignored file or containing download folder.</summary>
+    public static IEnumerable<string> FileAndAncestors(string filePath)
+    {
+        for (string? path = filePath; !string.IsNullOrEmpty(path); path = Path.GetDirectoryName(path))
+        {
+            yield return path;
+            yield return path + Path.DirectorySeparatorChar;
+        }
+    }
+
     // Non-dotted system/metadata folder names to skip (case-insensitive). Dot-prefixed
     // folders are handled generically below, so they don't need to be listed here.
     private static readonly HashSet<string> ExcludedFolderNames = new(StringComparer.OrdinalIgnoreCase)

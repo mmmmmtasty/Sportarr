@@ -64,6 +64,32 @@ public class DiskScanSuggestionTests : IDisposable
     }
 
     [Fact]
+    public async Task IgnoredDownloadFolderSuppressesChildrenUntilUnignoredButNotSiblingFolders()
+    {
+        using var db = CreateDb();
+        var folder = Path.Combine(_tempDir, "ignored");
+        var sibling = folder + "-other";
+        Directory.CreateDirectory(folder);
+        Directory.CreateDirectory(sibling);
+        var ignoredFile = Path.Combine(folder, "race.mkv");
+        var siblingFile = Path.Combine(sibling, "other.mkv");
+        await File.WriteAllTextAsync(ignoredFile, "video");
+        await File.WriteAllTextAsync(siblingFile, "video");
+        db.RootFolders.Add(new RootFolder { Path = _tempDir });
+        var ignored = new PendingImport { Title = "Ignored", DownloadId = "client-job",
+            FilePath = folder + Path.DirectorySeparatorChar, Status = PendingImportStatus.Ignored };
+        db.PendingImports.Add(ignored);
+        await db.SaveChangesAsync();
+        await InvokeDiscoverAsync(db);
+        (await db.PendingImports.ToListAsync()).Should().NotContain(p => p.FilePath == ignoredFile)
+            .And.Contain(p => p.FilePath == siblingFile);
+        db.PendingImports.Remove(ignored);
+        await db.SaveChangesAsync();
+        await InvokeDiscoverAsync(db);
+        (await db.PendingImports.ToListAsync()).Should().ContainSingle(p => p.FilePath == ignoredFile);
+    }
+
+    [Fact]
     public async Task SuggestsTheEventTheFilenameTokenNames()
     {
         using var db = CreateDb();
